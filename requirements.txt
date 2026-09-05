@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+anthropic
+elevenlabs
+nvidia-riva-client
+python-dotenv
+pydantic
+pytest
+httpx

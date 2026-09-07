@@ -1,0 +1,78 @@
+{
+    "severity_scale": {
+        "trust_bands": {
+            "trusting": { "min": 0.70, "max": 1.00 },
+            "guarded": { "min": 0.45, "max": 0.69 },
+            "distrustful": { "min": 0.20, "max": 0.44 },
+            "shut_down": { "min": 0.00, "max": 0.19 }
+        },
+        "saturation_bands": {
+            "calm": { "min": 0.00, "max": 0.29 },
+            "strained": { "min": 0.30, "max": 0.59 },
+            "overwhelmed": { "min": 0.60, "max": 0.84 },
+            "breaking_point": { "min": 0.85, "max": 1.00 }
+        }
+    },
+
+    "initial_state": {
+        "trust": 0.50,
+        "saturation": 0.40,
+        "unacknowledged_turns": 0,
+        "turn_count": 0,
+        "emotion": {
+            "primary": "SHOCK",
+            "secondary": "GRIEF",
+            "blend_weight": 0.2,
+            "intensity": 0.65
+        },
+        "defense": {
+            "mode": "NONE",
+            "masking": "NONE"
+        }
+    },
+
+    "personality": {
+        "preferred_defense_mode": "SARCASM",
+        "defense_trigger_trust": 0.35
+    },
+
+    "escalation": {
+        "unacknowledged_threshold": 3,
+        "acknowledgment_intensity_threshold": 0.3,
+        "trust_penalty": -0.05,
+        "saturation_penalty": 0.15
+    },
+
+    "flag_deltas": {
+        "validating": {
+            "trust": 0.10,
+            "saturation": -0.08,
+            "acknowledges": true
+        },
+        "silence_tolerance": {
+            "trust": 0.05,
+            "saturation": -0.04,
+            "acknowledges": true
+        },
+        "premature_reassurance": {
+            "trust": -0.08,
+            "saturation": 0.10,
+            "acknowledges": false
+        },
+        "jargon": {
+            "trust": -0.04,
+            "saturation": 0.06,
+            "acknowledges": false
+        },
+        "logistics_first": {
+            "trust": -0.04,
+            "saturation": 0.06,
+            "acknowledges": false
+        },
+        "interruption": {
+            "trust": -0.08,
+            "saturation": 0.12,
+            "acknowledges": false
+        }
+    }
+}

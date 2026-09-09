@@ -24,12 +24,11 @@ def build_initial_state(tuning: dict) -> PatientState:
     return PatientState(
         trust=init["trust"],
         saturation=init["saturation"],
-        unacknowledged_turns=init["unacknowledged_turns"],
-        turn_count=init["turn_count"],
+        unacknowledged_turns=0,
+        turn_count=0,
         emotion=emotion,
         defense=defense,
     )
-
 
 def apply_turn(state: PatientState, flags: TurnFlags, tuning: dict) -> tuple[PatientState, bool]:
     deltas = tuning["flag_deltas"]

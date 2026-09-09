@@ -17,8 +17,6 @@
     "initial_state": {
         "trust": 0.50,
         "saturation": 0.40,
-        "unacknowledged_turns": 0,
-        "turn_count": 0,
         "emotion": {
             "primary": "SHOCK",
             "secondary": "GRIEF",
@@ -33,10 +31,7 @@
 
     "personality": {
         "preferred_defense_mode": "SARCASM",
-        "defense_trigger_trust": 0.35
-    },
-
-    "escalation": {
+        "defense_trigger_trust": 0.35,
         "unacknowledged_threshold": 3,
         "acknowledgment_intensity_threshold": 0.3,
         "trust_penalty": -0.05,

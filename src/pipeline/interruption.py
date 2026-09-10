@@ -1,5 +1,5 @@
-import asyncio
 import random
+
 from state_engine.patient_state import EmotionMode
 
 INTERRUPT_LINE_BANK = {
@@ -33,20 +33,17 @@ def pick_line(category: str) -> str:
     return chosen
 
 
-async def handle_interrupt(state, renderer_call, tts_call, play_audio):
-    category = select_interrupt_category(state)
-    if category is None:
-        return
+def should_interrupt(state, seconds_speaking: float, seconds_since_last_interruption: float, persona) -> bool:
+    cfg = persona.interruption
 
-    filler_line = pick_line(category)
+    if state.emotion.primary not in cfg.trigger_emotions:
+        return False
+    if state.emotion.intensity < cfg.min_intensity:
+        return False
+    if seconds_speaking < cfg.min_seconds_before_interrupt:
+        return False
+    if seconds_since_last_interruption < cfg.cooldown_seconds:
+        return False
 
-    filler_audio_task = asyncio.create_task(tts_call(filler_line))
-    full_response_task = asyncio.create_task(
-        generate_interrupt_continuation(state, filler_line, renderer_call, tts_call)
-    )
-
-    filler_audio = await filler_audio_task
-    await play_audio(filler_audio)
-
-    full_audio = await full_response_task
-    await play_audio(full_audio)
+    probability = cfg.base_probability * state.emotion.intensity
+    return random.random() < probability

@@ -3,6 +3,7 @@ import time
 from pipecat.frames.frames import Frame, TranscriptionFrame, InterimTranscriptionFrame, TextFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from pipeline.frame import StateUpdatedFrame
 from state_engine.config import PersonaConfig
 from state_engine.engine import apply_turn, build_initial_state
 from interpreter.claude import call_interpreter
@@ -11,7 +12,6 @@ from interpreter.prompt import build_interpreter_message
 from renderer.claude import call_renderer
 from renderer.prompt import build_renderer_message
 from interruption import should_interrupt, INTERRUPT_LINE_BANK, select_interrupt_category, pick_line
-
 
 class InterpreterProcessor(FrameProcessor):
     def __init__(self, persona: PersonaConfig):

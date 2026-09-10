@@ -1,7 +1,15 @@
 import json
 import sys
 
-REQUIRED_FLAGS = ["validating", "silence_tolerance", "premature_reassurance", "jargon", "logistics_first", "interruption",]
+REQUIRED_FLAGS = [
+    "validating",
+    "silence_tolerance",
+    "premature_reassurance",
+    "jargon",
+    "logistics_first",
+    "interruption",
+]
+
 VALID_EMOTIONS = {"NONE", "SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING"}
 VALID_DEFENSE_MODES = {"NONE", "SARCASM", "INTELLECTUALIZING", "MINIMIZING"}
 
@@ -15,13 +23,29 @@ def validate_tuning_file(path: str) -> None:
         tuning = json.load(f)
 
     errors = []
+    errors += _validate_scenario(tuning)
     errors += _validate_severity_scale(tuning)
+    errors += _validate_audio_tags(tuning)
     errors += _validate_personality(tuning)
+    errors += _validate_interruption(tuning)
     errors += _validate_initial_state(tuning)
     errors += _validate_flag_deltas(tuning)
 
     if errors:
         raise TuningValidationError("\n".join(errors))
+
+
+def _validate_scenario(tuning: dict) -> list[str]:
+    if "scenario" not in tuning:
+        return ["Missing top-level key: scenario"]
+    scenario = tuning["scenario"]
+    errors = []
+    for key in ("patient_name", "age", "prompt"):
+        if key not in scenario:
+            errors.append(f"Missing scenario.{key}")
+    if "age" in scenario and not isinstance(scenario["age"], int):
+        errors.append("scenario.age must be an integer")
+    return errors
 
 
 def _validate_severity_scale(tuning: dict) -> list[str]:
@@ -35,13 +59,27 @@ def _validate_severity_scale(tuning: dict) -> list[str]:
             errors.append(f"Missing severity_scale.{band_group}")
             continue
         for band_name, band in scale[band_group].items():
-            if "min" not in band or "max" not in band:
-                errors.append(f"severity_scale.{band_group}.{band_name} missing min/max")
-                continue
-            if band["min"] > band["max"]:
-                errors.append(f"severity_scale.{band_group}.{band_name} has min > max")
-            if not (0.0 <= band["min"] <= 1.0) or not (0.0 <= band["max"] <= 1.0):
-                errors.append(f"severity_scale.{band_group}.{band_name} out of 0-1 range")
+            for key in ("min", "max", "description"):
+                if key not in band:
+                    errors.append(f"severity_scale.{band_group}.{band_name} missing {key}")
+            if "min" in band and "max" in band:
+                if band["min"] > band["max"]:
+                    errors.append(f"severity_scale.{band_group}.{band_name} has min > max")
+                if not (0.0 <= band["min"] <= 1.0) or not (0.0 <= band["max"] <= 1.0):
+                    errors.append(f"severity_scale.{band_group}.{band_name} out of 0-1 range")
+    return errors
+
+
+def _validate_audio_tags(tuning: dict) -> list[str]:
+    if "audio_tags" not in tuning:
+        return ["Missing top-level key: audio_tags"]
+    errors = []
+    tags = tuning["audio_tags"]
+    for emotion_name, tag_list in tags.items():
+        if emotion_name not in VALID_EMOTIONS or emotion_name == "NONE":
+            errors.append(f"audio_tags has invalid emotion key: {emotion_name}")
+        if not isinstance(tag_list, list) or not all(isinstance(t, str) for t in tag_list):
+            errors.append(f"audio_tags.{emotion_name} must be a list of strings")
     return errors
 
 
@@ -78,6 +116,35 @@ def _validate_personality(tuning: dict) -> list[str]:
             errors.append(f"personality.{key} must be between 0 and 1")
 
     return errors
+
+
+def _validate_interruption(tuning: dict) -> list[str]:
+    if "interruption" not in tuning:
+        return ["Missing top-level key: interruption"]
+    errors = []
+    cfg = tuning["interruption"]
+
+    if "trigger_emotions" not in cfg:
+        errors.append("Missing interruption.trigger_emotions")
+    else:
+        for emotion_name in cfg["trigger_emotions"]:
+            if emotion_name not in VALID_EMOTIONS or emotion_name == "NONE":
+                errors.append(f"interruption.trigger_emotions has invalid emotion: {emotion_name}")
+
+    for key in ("min_intensity", "base_probability"):
+        if key not in cfg:
+            errors.append(f"Missing interruption.{key}")
+        elif not (0.0 <= cfg[key] <= 1.0):
+            errors.append(f"interruption.{key} must be between 0 and 1")
+
+    for key in ("min_seconds_before_interrupt", "cooldown_seconds"):
+        if key not in cfg:
+            errors.append(f"Missing interruption.{key}")
+        elif cfg[key] < 0:
+            errors.append(f"interruption.{key} must be non-negative")
+
+    return errors
+
 
 def _validate_initial_state(tuning: dict) -> list[str]:
     errors = []
@@ -119,6 +186,9 @@ def _validate_initial_state(tuning: dict) -> list[str]:
         if "masking" in defense and defense["masking"] not in VALID_EMOTIONS:
             errors.append(f"initial_state.defense.masking invalid: {defense['masking']}")
 
+    if "unacknowledged_turns" in init or "turn_count" in init:
+        errors.append("initial_state should not contain unacknowledged_turns or turn_count (always zero, removed from schema)")
+
     return errors
 
 
@@ -148,7 +218,7 @@ def _validate_flag_deltas(tuning: dict) -> list[str]:
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:
-        print("Usage: python validate_tuning.py <path_to_tuning.json>")
+        print("Usage: python validate.py <path_to_tuning.json>")
         sys.exit(1)
 
     try:

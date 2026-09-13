@@ -1,6 +1,5 @@
 import time
 
-from interruption import pick_line, select_interrupt_category, should_interrupt
 from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
@@ -13,6 +12,7 @@ from interpreter.claude import call_interpreter
 from interpreter.parser import parse_turn_flags
 from interpreter.prompt import build_interpreter_message
 from pipeline.frame import StateUpdatedFrame
+from pipeline.interruption import pick_line, select_interrupt_category, should_interrupt
 from renderer.claude import call_renderer
 from renderer.prompt import build_renderer_message
 from state_engine.config import PersonaConfig

@@ -5,7 +5,7 @@ from state_engine.turn_flags import TurnFlags
 
 
 def zero_flags(**overrides):
-    base = dict(validating=0, silence_tolerance=0, premature_reassurance=0, jargon=0, logistics_first=0, interruption=0)
+    base = {"validating": 0, "silence_tolerance": 0, "premature_reassurance": 0, "jargon": 0, "logistics_first": 0, "interruption": 0}
     base.update(overrides)
     return TurnFlags(**base)
 

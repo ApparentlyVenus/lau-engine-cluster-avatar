@@ -1,3 +1,4 @@
+import itertools
 from unittest.mock import patch
 
 from pipeline.interruption import (
@@ -72,5 +73,5 @@ def test_pick_line_stays_within_bank():
 
 def test_pick_line_avoids_immediate_repeat():
     seen = [pick_line("anger_interrupt") for _ in range(20)]
-    consecutive_repeats = sum(1 for a, b in zip(seen, seen[1:]) if a == b)
+    consecutive_repeats = sum(1 for a, b in itertools.pairwise(seen) if a == b)
     assert consecutive_repeats == 0

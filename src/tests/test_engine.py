@@ -1,12 +1,10 @@
-import pytest
-
 from state_engine.engine import apply_turn, build_initial_state
 from state_engine.patient_state import DefenseMode, EmotionMode
 from state_engine.turn_flags import TurnFlags
 
 
 def zero_flags(**overrides):
-    base = dict(validating=0, silence_tolerance=0, premature_reassurance=0, jargon=0, logistics_first=0, interruption=0)
+    base = {"validating": 0, "silence_tolerance": 0, "premature_reassurance": 0, "jargon": 0, "logistics_first": 0, "interruption": 0}
     base.update(overrides)
     return TurnFlags(**base)
 

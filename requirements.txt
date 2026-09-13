@@ -7,4 +7,4 @@ python-dotenv
 pydantic
 pytest
 httpx
-pipecat-ai[anthropic,elevenlabs,nvidia,silero]
+pipecat-ai[anthropic,elevenlabs,nvidia,silero,local]

@@ -1,17 +1,23 @@
 import time
 
-from pipecat.frames.frames import Frame, TranscriptionFrame, InterimTranscriptionFrame, TextFrame
+from interruption import pick_line, select_interrupt_category, should_interrupt
+from pipecat.frames.frames import (
+    Frame,
+    InterimTranscriptionFrame,
+    TextFrame,
+    TranscriptionFrame,
+)
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
-from pipeline.frame import StateUpdatedFrame
-from state_engine.config import PersonaConfig
-from state_engine.engine import apply_turn, build_initial_state
 from interpreter.claude import call_interpreter
 from interpreter.parser import parse_turn_flags
 from interpreter.prompt import build_interpreter_message
+from pipeline.frame import StateUpdatedFrame
 from renderer.claude import call_renderer
 from renderer.prompt import build_renderer_message
-from interruption import should_interrupt, INTERRUPT_LINE_BANK, select_interrupt_category, pick_line
+from state_engine.config import PersonaConfig
+from state_engine.engine import apply_turn, build_initial_state
+
 
 class InterpreterProcessor(FrameProcessor):
     def __init__(self, persona: PersonaConfig):

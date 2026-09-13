@@ -4,13 +4,17 @@ import os
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineTask
-from pipecat.transports.base_transport import TransportParams
-from pipecat.transports.local.audio import LocalAudioTransport
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.nvidia.stt import NvidiaSTTService
+from pipecat.transports.base_transport import TransportParams
+from pipecat.transports.local.audio import LocalAudioTransport
 
+from pipeline.processors import (
+    InterpreterProcessor,
+    InterruptWatcherProcessor,
+    RendererProcessor,
+)
 from state_engine.config import PersonaConfig
-from pipeline.processors import InterpreterProcessor, RendererProcessor, InterruptWatcherProcessor
 
 
 async def main(persona_path: str):

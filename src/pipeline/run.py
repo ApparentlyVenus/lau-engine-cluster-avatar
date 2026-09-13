@@ -2,12 +2,12 @@ import asyncio
 import os
 
 from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.runner import PipelineRunner
-from pipecat.pipeline.task import PipelineTask
+from pipecat.pipeline.worker import PipelineWorker
 from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 from pipecat.services.nvidia.stt import NvidiaSTTService
 from pipecat.transports.base_transport import TransportParams
 from pipecat.transports.local.audio import LocalAudioTransport
+from pipecat.workers.runner import WorkerRunner
 
 from pipeline.processors import (
     InterpreterProcessor,
@@ -42,9 +42,10 @@ async def main(persona_path: str):
         transport.output(),
     ])
 
-    task = PipelineTask(pipeline)
-    runner = PipelineRunner()
-    await runner.run(task)
+    worker = PipelineWorker(pipeline)
+    runner = WorkerRunner()
+    await runner.add_workers(worker)
+    await runner.run()
 
 
 if __name__ == "__main__":

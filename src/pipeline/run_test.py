@@ -1,6 +1,10 @@
 import asyncio
 import os
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.worker import PipelineWorker
 from pipecat.services.nvidia.stt import NvidiaSTTService

@@ -20,11 +20,12 @@ from state_engine.engine import apply_turn, build_initial_state
 
 
 class InterpreterProcessor(FrameProcessor):
-    def __init__(self, persona: PersonaConfig):
+    def __init__(self, persona: PersonaConfig, filler_getter=None):
         super().__init__()
         self.persona = persona
         self.state = build_initial_state(persona)
         self.history: list[str] = []
+        self.filler_getter = filler_getter
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -37,7 +38,12 @@ class InterpreterProcessor(FrameProcessor):
             self.state, escalated = apply_turn(self.state, flags, self.persona)
             self.history.append(frame.text)
 
-            await self.push_frame(StateUpdatedFrame(state=self.state, learner_transcript=frame.text, escalated=escalated), direction)
+            filler_line = self.filler_getter() if self.filler_getter else None
+
+            await self.push_frame(
+                StateUpdatedFrame(state=self.state, learner_transcript=frame.text, escalated=escalated, filler_line=filler_line),
+                direction,
+            )
         else:
             await self.push_frame(frame, direction)
 
@@ -51,7 +57,7 @@ class RendererProcessor(FrameProcessor):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StateUpdatedFrame):
-            message = build_renderer_message(self.persona, frame.state, frame.learner_transcript)
+            message = build_renderer_message(self.persona, frame.state, frame.learner_transcript, filler_line=frame.filler_line)
             line = await call_renderer(message)
             await self.push_frame(TextFrame(text=line), direction)
         else:
@@ -66,6 +72,7 @@ class InterruptWatcherProcessor(FrameProcessor):
         self.turn_start_time = None
         self.last_interruption_time = 0.0
         self.interrupted_this_turn = False
+        self.filler_line_this_turn = None
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
@@ -73,6 +80,8 @@ class InterruptWatcherProcessor(FrameProcessor):
         if isinstance(frame, InterimTranscriptionFrame):
             if self.turn_start_time is None:
                 self.turn_start_time = time.monotonic()
+                self.interrupted_this_turn = False
+                self.filler_line_this_turn = None
 
             if not self.interrupted_this_turn:
                 seconds_speaking = time.monotonic() - self.turn_start_time
@@ -85,10 +94,10 @@ class InterruptWatcherProcessor(FrameProcessor):
                     category = select_interrupt_category(state)
                     if category:
                         filler = pick_line(category)
+                        self.filler_line_this_turn = filler
                         await self.push_frame(TextFrame(text=filler), FrameDirection.DOWNSTREAM)
 
         elif isinstance(frame, TranscriptionFrame):
             self.turn_start_time = None
-            self.interrupted_this_turn = False
 
         await self.push_frame(frame, direction)

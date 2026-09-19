@@ -22,10 +22,16 @@ async def main(persona_path: str):
 
     transport = LocalAudioTransport(TransportParams(audio_in_enabled=True, audio_out_enabled=True))
 
-    stt = NvidiaSTTService(api_key=os.environ["NVIDIA_API_KEY"])
+    stt = NvidiaSTTService(
+        api_key=os.environ["NVIDIA_API_KEY"],
+        model_function_map={
+            "function_id": "d3fe9151-442b-4204-a70d-5fcc597fd610",
+            "model_name": "parakeet-tdt-0.6b-v2",
+        },
+    )
 
-    interpreter = InterpreterProcessor(persona)
     interrupt_watcher = InterruptWatcherProcessor(persona, state_getter=lambda: interpreter.state)
+    interpreter = InterpreterProcessor(persona, filler_getter=lambda: interrupt_watcher.filler_line_this_turn)
     renderer = RendererProcessor(persona)
     tts = ElevenLabsTTSService(
         api_key=os.environ["ELEVENLABS_API_KEY"],

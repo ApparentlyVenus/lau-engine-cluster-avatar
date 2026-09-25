@@ -1,8 +1,8 @@
 import json
 from dataclasses import dataclass
 
-from state_engine.patient_state import EmotionMode, DefenseMode
-from state_engine.validate import validate_tuning_file, TuningValidationError
+from state_engine.patient_state import DefenseMode, EmotionMode
+from state_engine.validate import TuningValidationError, validate_tuning_file
 
 
 @dataclass

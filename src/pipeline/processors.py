@@ -13,7 +13,7 @@ from interpreter.parser import parse_turn_flags
 from interpreter.prompt import build_interpreter_message
 from pipeline.frame import StateUpdatedFrame
 from pipeline.interruption import pick_line, select_interrupt_category, should_interrupt
-from renderer.claude import call_renderer
+from renderer.claude import stream_renderer
 from renderer.prompt import build_renderer_message
 from state_engine.config import PersonaConfig
 from state_engine.engine import apply_turn, build_initial_state
@@ -60,9 +60,13 @@ class RendererProcessor(FrameProcessor):
         if isinstance(frame, StateUpdatedFrame):
             self.history.append(f"Learner: {frame.learner_transcript}")
             message = build_renderer_message(self.persona, frame.state, frame.learner_transcript, history=self.history, filler_line=frame.filler_line)
-            line = await call_renderer(message)
-            self.history.append(f"Patient: {line}")
-            await self.push_frame(TextFrame(text=line), direction)
+
+            full_line = ""
+            async for chunk in stream_renderer(message):
+                full_line += chunk + " "
+                await self.push_frame(TextFrame(text=chunk), direction)
+
+            self.history.append(f"Patient: {full_line.strip()}")
         else:
             await self.push_frame(frame, direction)
 

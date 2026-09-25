@@ -8,6 +8,7 @@ REQUIRED_FLAGS = [
     "jargon",
     "logistics_first",
     "interruption",
+    "disrespect"
 ]
 
 VALID_EMOTIONS = {"NONE", "SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING"}

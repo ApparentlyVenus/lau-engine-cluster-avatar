@@ -9,6 +9,7 @@ REQUIRED_KEYS = [
     "jargon",
     "logistics_first",
     "interruption",
+    "disrespect"
 ]
 
 
@@ -46,4 +47,5 @@ def parse_turn_flags(raw_response: str) -> TurnFlags:
         jargon=float(data["jargon"]),
         logistics_first=float(data["logistics_first"]),
         interruption=float(data["interruption"]),
+        disrespect=float(data["disrespect"])
     )

@@ -8,3 +8,4 @@ class TurnFlags:
     logistics_first: float
     silence_tolerance: float
     interruption: float
+    disrespect: float

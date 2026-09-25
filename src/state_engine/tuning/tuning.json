@@ -58,6 +58,7 @@
     "premature_reassurance": { "trust": -0.08, "saturation": 0.10, "acknowledges": false },
     "jargon": { "trust": -0.04, "saturation": 0.06, "acknowledges": false },
     "logistics_first": { "trust": -0.04, "saturation": 0.06, "acknowledges": false },
-    "interruption": { "trust": -0.08, "saturation": 0.12, "acknowledges": false }
+    "interruption": { "trust": -0.08, "saturation": 0.12, "acknowledges": false },
+    "disrespect": { "trust": -0.30, "saturation": 0.40, "acknowledges": false }
   }
 }

@@ -10,12 +10,13 @@ premature_reassurance — the learner offered comfort before the patient was rea
 jargon — the learner used clinical language without a plain-language explanation.
 logistics_first — the learner moved to next steps before acknowledging the emotional weight of the moment.
 interruption — the learner talked over the patient mid-sentence.
+disrespect — the learner was condescending, dismissive, mocking, or cruel toward her, independent of the clinical content of what they said (e.g. "are you slow?", laughing at her diagnosis, mocking her fear).
 
 A turn can score above 0 on more than one category. Most turns will score 0 on most categories.
 
 Return ONLY a JSON object with exactly these six keys, no other text:
 
-{"validating": 0.0, "silence_tolerance": 0.0, "premature_reassurance": 0.0, "jargon": 0.0, "logistics_first": 0.0, "interruption": 0.0}
+{"validating": 0.0, "silence_tolerance": 0.0, "premature_reassurance": 0.0, "jargon": 0.0, "logistics_first": 0.0, "interruption": 0.0, disrespect: 0.0}
 """
 
 def build_interpreter_message(persona, transcript: str, history: list[str]) -> str:

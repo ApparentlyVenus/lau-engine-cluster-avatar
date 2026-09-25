@@ -126,16 +126,18 @@ class PersonaConfig:
         )
 
     def trust_band(self, value: float) -> Band:
-        for band in self.severity_scale.trust_bands.values():
-            if band.min <= value <= band.max:
+        candidates = sorted(self.severity_scale.trust_bands.values(), key=lambda b: b.min, reverse=True)
+        for band in candidates:
+            if value >= band.min:
                 return band
-        raise ValueError(f"trust value {value} does not fall within any configured band")
+        raise ValueError(f"trust value {value} is below every configured band")
 
     def saturation_band(self, value: float) -> Band:
-        for band in self.severity_scale.saturation_bands.values():
-            if band.min <= value <= band.max:
+        candidates = sorted(self.severity_scale.saturation_bands.values(), key=lambda b: b.min, reverse=True)
+        for band in candidates:
+            if value >= band.min:
                 return band
-        raise ValueError(f"saturation value {value} does not fall within any configured band")
+        raise ValueError(f"saturation value {value} is below every configured band")
 
     def allowed_tags(self, emotion: EmotionMode) -> list[str]:
         return self.audio_tags.get(emotion, [])

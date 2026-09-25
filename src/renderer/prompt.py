@@ -4,9 +4,9 @@ RENDERER_TASK_PROMPT = """You are voicing a patient in a clinical communication 
 
 Use inline bracketed audio tags to direct vocal delivery, matching only the tags provided for her current emotional state. Place tags naturally within the line, not just at the start.
 
-Never explain or describe her emotional state directly. Never write stage directions outside of the allowed bracket tags. Never break character."""
+Never repeat a sentiment, phrase, or question you have already used earlier in the conversation. Never explain or describe her emotional state directly. Never write stage directions outside of the allowed bracket tags. Never break character."""
 
-def build_renderer_message(persona, state, learner_transcript: str, filler_line: str | None = None) -> str:
+def build_renderer_message(persona, state, learner_transcript: str, history: list[str] | None = None, filler_line: str | None = None) -> str:
     trust_band = persona.trust_band(state.trust)
     saturation_band = persona.saturation_band(state.saturation)
     allowed = persona.allowed_tags(state.emotion.primary)
@@ -14,6 +14,10 @@ def build_renderer_message(persona, state, learner_transcript: str, filler_line:
     defense_line = ""
     if state.defense.mode.name != "NONE":
         defense_line = f"\nShe is currently masking {state.defense.masking.name.lower()} with {state.defense.mode.name.lower()}."
+
+    history_block = ""
+    if history:
+        history_block = "\n\nConversation so far:\n" + "\n".join(history)
 
     filler_note = ""
     if filler_line:
@@ -24,7 +28,7 @@ def build_renderer_message(persona, state, learner_transcript: str, filler_line:
 Her current state:
 - Primary emotion: {state.emotion.primary.name} (with an undertone of {state.emotion.secondary.name}, blend weight {state.emotion.blend_weight:.2f})
 - Trust: {trust_band.description}
-- Emotional saturation: {saturation_band.description}{defense_line}
+- Emotional saturation: {saturation_band.description}{defense_line}{history_block}
 
 Allowed audio tags for this turn: {', '.join(allowed) if allowed else '(none)'}
 

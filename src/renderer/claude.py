@@ -8,12 +8,15 @@ client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
 RENDERER_MODEL = os.environ.get("RENDERER_MODEL", "claude-sonnet-5")
 
-
 async def call_renderer(message: str) -> str:
     response = await client.messages.create(
         model=RENDERER_MODEL,
         max_tokens=150,
         system=RENDERER_TASK_PROMPT,
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": message}],
     )
-    return response.content[0].text
+    for block in response.content:
+        if block.type == "text":
+            return block.text
+    raise ValueError(f"No text block found in renderer response: {response.content}")

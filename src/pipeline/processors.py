@@ -52,17 +52,19 @@ class RendererProcessor(FrameProcessor):
     def __init__(self, persona: PersonaConfig):
         super().__init__()
         self.persona = persona
+        self.history: list[str] = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StateUpdatedFrame):
-            message = build_renderer_message(self.persona, frame.state, frame.learner_transcript, filler_line=frame.filler_line)
+            self.history.append(f"Learner: {frame.learner_transcript}")
+            message = build_renderer_message(self.persona, frame.state, frame.learner_transcript, history=self.history, filler_line=frame.filler_line)
             line = await call_renderer(message)
+            self.history.append(f"Patient: {line}")
             await self.push_frame(TextFrame(text=line), direction)
         else:
             await self.push_frame(frame, direction)
-
 
 class InterruptWatcherProcessor(FrameProcessor):
     def __init__(self, persona: PersonaConfig, state_getter):

@@ -4,6 +4,7 @@ import sys
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 from loguru import logger

@@ -11,10 +11,10 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+import llm_client
 from interpreter.claude import INTERPRETER_MODEL, call_interpreter
 from interpreter.parser import parse_turn_flags
 from interpreter.prompt import build_interpreter_message
-import llm_client
 from pipeline.frame import StateUpdatedFrame, TurnStartedFrame
 from pipeline.interruption import pick_line, select_interrupt_category, should_interrupt
 from renderer.claude import RENDERER_MODEL, stream_renderer
@@ -76,7 +76,7 @@ class InterpreterProcessor(FrameProcessor):
                 raw_response = await call_interpreter(message)
                 mark("interpreter", "API call <-", repr(raw_response.strip()), key="interp_done")
                 flags = parse_turn_flags(raw_response)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 # Degrade quietly live: treat the turn as flagless rather than
                 # dropping it. This is loud in the log on purpose.
                 mark("interpreter", "FAILED, no flags", repr(e), key="interp_done")
@@ -145,13 +145,13 @@ class RendererProcessor(FrameProcessor):
             if previous is not None:
                 try:
                     await previous
-                except BaseException:
+                except BaseException:  # noqa: BLE001, S110
                     pass
             try:
                 await coro
             except asyncio.CancelledError:
                 raise
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001
                 mark("renderer", "FAILED", repr(e))
 
         self.last_task = asyncio.create_task(run())

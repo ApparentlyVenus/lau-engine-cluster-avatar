@@ -4,6 +4,7 @@ import time
 import wave
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import riva.client

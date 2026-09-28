@@ -1,3 +1,7 @@
+import os
+
+os.environ.setdefault("ANTHROPIC_API_KEY", "test-key-not-used")
+
 import pytest
 
 from state_engine.config import PersonaConfig
@@ -59,6 +63,7 @@ def minimal_persona_dict():
             "jargon": {"trust": -0.04, "saturation": 0.06, "acknowledges": False},
             "logistics_first": {"trust": -0.04, "saturation": 0.06, "acknowledges": False},
             "interruption": {"trust": -0.08, "saturation": 0.12, "acknowledges": False},
+            "disrespect": {"trust": -0.30, "saturation": 0.40, "acknowledges": False},
         },
     }
 

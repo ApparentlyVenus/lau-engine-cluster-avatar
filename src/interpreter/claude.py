@@ -3,24 +3,29 @@ import os
 import anthropic
 
 from interpreter.prompt import INTERPRETER_TASK_PROMPT
-
-client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+from llm_client import client, touch
 
 INTERPRETER_MODEL = os.environ.get("INTERPRETER_MODEL", "claude-haiku-4-5-20251001")
+INTERPRETER_TIMEOUT_S = float(os.environ.get("INTERPRETER_TIMEOUT_S", "5"))
 
 _use_stop = True
 
 
 async def _create(message: str, use_stop: bool):
     extra = {"stop_sequences": ["}"]} if use_stop else {}
-    return await client.messages.create(
-        model=INTERPRETER_MODEL,
-        max_tokens=100,
-        thinking={"type": "disabled"},
-        system=[{"type": "text", "text": INTERPRETER_TASK_PROMPT, "cache_control": {"type": "ephemeral"}}],
-        messages=[{"role": "user", "content": message}],
-        **extra,
-    )
+    touch()
+    try:
+        return await client.messages.create(
+            model=INTERPRETER_MODEL,
+            max_tokens=100,
+            thinking={"type": "disabled"},
+            system=[{"type": "text", "text": INTERPRETER_TASK_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": message}],
+            timeout=INTERPRETER_TIMEOUT_S,
+            **extra,
+        )
+    finally:
+        touch()
 
 
 async def call_interpreter(message: str) -> str:

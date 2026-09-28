@@ -11,6 +11,17 @@ Use only facts stated in her situation description. Do not invent test names, pr
 Never repeat a sentiment, phrase, or question you have already used earlier in the conversation. Never explain or describe her emotional state directly. Never write stage directions outside of the allowed bracket tags. Never break character."""
 
 
+def describe_undertone(blend_weight: float) -> str:
+    # Bucketed on purpose. The raw weight changes a little every turn, and the
+    # speculative renderer only reuses its early start when the message is
+    # identical, so a two-decimal number here would force a restart every turn.
+    if blend_weight < 0.2:
+        return "a slight"
+    if blend_weight < 0.35:
+        return "a noticeable"
+    return "a strong"
+
+
 def build_renderer_message(
     persona,
     state,
@@ -39,7 +50,7 @@ def build_renderer_message(
     return f"""{build_scenario_block(persona)}
 
 Her current state:
-- Primary emotion: {state.emotion.primary.name} (with an undertone of {state.emotion.secondary.name}, blend weight {state.emotion.blend_weight:.2f})
+- Primary emotion: {state.emotion.primary.name} (with {describe_undertone(state.emotion.blend_weight)} undertone of {state.emotion.secondary.name})
 - Trust: {trust_band.description}
 - Emotional saturation: {saturation_band.description}{defense_line}{history_block}
 

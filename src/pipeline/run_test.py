@@ -23,13 +23,9 @@ async def main(persona_path: str):
 
     transport = LocalAudioTransport(TransportParams(audio_in_enabled=True, audio_out_enabled=False))
 
-    stt = NvidiaSTTService(
-        api_key=os.environ["NVIDIA_API_KEY"],
-        model_function_map={
-            "function_id": "d3fe9151-442b-4204-a70d-5fcc597fd610",
-            "model_name": "parakeet-tdt-0.6b-v2",
-        },
-    )
+    # Default streaming model. parakeet-tdt-0.6b-v2 is rejected by the hosted
+    # endpoint in streaming mode (INVALID_ARGUMENT).
+    stt = NvidiaSTTService(api_key=os.environ["NVIDIA_API_KEY"])
 
     interrupt_watcher = InterruptWatcherProcessor(persona, state_getter=lambda: fake_state)
 

@@ -30,16 +30,17 @@ def mark(component: str, event: str, detail: str = "", key: str | None = None, o
 
 
 def summary():
-    prev = None
+    # Stages can now overlap (the renderer starts before the interpreter
+    # returns), so print each stage as an offset from the last speech instead
+    # of as a gap from the previous stage.
+    origin = _marks.get("last_word", min(_marks.values()) if _marks else None)
     print("    --- latency from last speech ---")
     for key, label in STAGES:
-        if key not in _marks:
+        if key not in _marks or key == "last_word":
             continue
-        t = _marks[key]
-        if prev is not None:
-            print(f"    {label:<24}{t - prev:7.3f}s")
-        prev = t
-    if "last_word" in _marks and "first_chunk" in _marks:
-        print(f"    {'TOTAL to first chunk':<24}{_marks['first_chunk'] - _marks['last_word']:7.3f}s")
+        if origin is not None:
+            print(f"    {label:<24}at {_marks[key] - origin:6.3f}s")
+    if origin is not None and "first_chunk" in _marks:
+        print(f"    {'TOTAL to first chunk':<24}{_marks['first_chunk'] - origin:7.3f}s")
     for key in [k for k in _marks if k != "last_word"]:
         del _marks[key]

@@ -21,8 +21,7 @@ def parse_turn_flags(raw_response: str) -> TurnFlags:
     cleaned = raw_response.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
-        if cleaned.startswith("json"):
-            cleaned = cleaned[4:]
+        cleaned = cleaned.removeprefix("json")
         cleaned = cleaned.strip()
 
     try:

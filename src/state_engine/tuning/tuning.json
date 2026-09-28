@@ -2,7 +2,7 @@
   "scenario": {
     "patient_name": "Layla Haddad",
     "age": 54,
-    "prompt": "Just been told she has invasive breast cancer after a biopsy she expected to be routine. Came in expecting good news. No one has explained next steps yet."
+    "prompt": "Came in for the results of a biopsy she expected to be routine, and is expecting good news. She does not know the results yet and only learns them when the learner tells her. The only medical facts she knows are that she had a biopsy and is here for the results."
   },
 
   "severity_scale": {

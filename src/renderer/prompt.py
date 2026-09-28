@@ -4,9 +4,21 @@ RENDERER_TASK_PROMPT = """You are voicing a patient in a clinical communication 
 
 Use inline bracketed audio tags to direct vocal delivery, matching only the tags provided for her current emotional state. Place tags naturally within the line, not just at the start.
 
+Write only the words she says aloud. Do not use quotation marks.
+
+Use only facts stated in her situation description. Do not invent test names, procedures, stages, or other medical details that are not stated there.
+
 Never repeat a sentiment, phrase, or question you have already used earlier in the conversation. Never explain or describe her emotional state directly. Never write stage directions outside of the allowed bracket tags. Never break character."""
 
-def build_renderer_message(persona, state, learner_transcript: str, history: list[str] | None = None, filler_line: str | None = None) -> str:
+
+def build_renderer_message(
+    persona,
+    state,
+    learner_transcript: str,
+    history: list[str] | None = None,
+    filler_line: str | None = None,
+    max_history_lines: int = 8,
+) -> str:
     trust_band = persona.trust_band(state.trust)
     saturation_band = persona.saturation_band(state.saturation)
     allowed = persona.allowed_tags(state.emotion.primary)
@@ -17,7 +29,8 @@ def build_renderer_message(persona, state, learner_transcript: str, history: lis
 
     history_block = ""
     if history:
-        history_block = "\n\nConversation so far:\n" + "\n".join(history)
+        trimmed = history[-max_history_lines:]
+        history_block = "\n\nConversation so far:\n" + "\n".join(trimmed)
 
     filler_note = ""
     if filler_line:

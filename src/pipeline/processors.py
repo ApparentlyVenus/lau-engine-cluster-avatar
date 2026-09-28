@@ -50,7 +50,7 @@ class InterpreterProcessor(FrameProcessor):
                 f"trust={self.state.trust:.2f} sat={self.state.saturation:.2f} escalated={escalated}",
                 key="state_done",
             )
-            self.history.append(frame.text)
+            self.history.append(f"Learner: {frame.text}")
 
             filler_line = self.filler_getter() if self.filler_getter else None
 
@@ -60,6 +60,7 @@ class InterpreterProcessor(FrameProcessor):
                     learner_transcript=frame.text,
                     escalated=escalated,
                     filler_line=filler_line,
+                    history=self.history,
                 ),
                 direction,
             )
@@ -71,18 +72,17 @@ class RendererProcessor(FrameProcessor):
     def __init__(self, persona: PersonaConfig):
         super().__init__()
         self.persona = persona
-        self.history: list[str] = []
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StateUpdatedFrame):
-            self.history.append(f"Learner: {frame.learner_transcript}")
+            history = frame.history if frame.history is not None else []
             message = build_renderer_message(
                 self.persona,
                 frame.state,
                 frame.learner_transcript,
-                history=self.history,
+                history=history,
                 filler_line=frame.filler_line,
             )
             mark("renderer", "API call ->", f"{RENDERER_MODEL}, {len(message)} chars")
@@ -94,7 +94,7 @@ class RendererProcessor(FrameProcessor):
                 await self.push_frame(TextFrame(text=chunk), direction)
 
             mark("renderer", "stream done", key="render_done")
-            self.history.append(f"Patient: {full_line.strip()}")
+            history.append(f"Patient: {full_line.strip()}")
             summary()
         else:
             await self.push_frame(frame, direction)

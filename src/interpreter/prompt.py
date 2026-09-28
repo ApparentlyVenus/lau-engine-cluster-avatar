@@ -8,18 +8,34 @@ validating: the learner named or acknowledged the patient's emotion.
 silence_tolerance: the learner let a pause sit rather than immediately re-filling it after a difficult moment.
 premature_reassurance: the learner offered comfort or minimized the situation before the patient was ready for it, even if well-intentioned (e.g. "don't worry", "it will be fine"). Stating a next step or a plan is not reassurance by itself; that belongs under logistics_first.
 jargon: the learner used clinical language without a plain-language explanation.
-logistics_first: the learner moved to next steps before acknowledging the emotional weight of the moment.
+logistics_first: the learner, on their own initiative, moved to next steps, plans, or scheduling before acknowledging the emotional weight of the moment. Answering a question the patient just asked about next steps does not count.
 disrespect: the learner was condescending, dismissive, mocking, or cruel toward her, independent of the clinical content of what they said (e.g. "are you slow?", laughing at her diagnosis, mocking her fear).
 
 You only see text, so never infer anything about timing, tone of voice, or talking over her.
 
-Consider what the patient herself just said before scoring the learner's response. If she directly asked a question or requested information (e.g. "what happens next?"), a direct answer to that request is not premature or out of place. Do not score logistics_first, jargon, or similar categories against a response that is directly answering what she just asked for.
+Consider what the patient herself just said before scoring the learner's response. Do not score jargon or logistics_first against a response that is directly answering what she just asked for.
 
 A turn can score above 0 on more than one category. Most turns score 0 on most categories.
 
-Return ONLY a raw JSON object containing the categories that scored above 0. Never use markdown or code fences. Omit every category that scored 0. If nothing applies, return {}.
+Examples (the patient's last line, the learner's line, then the correct output):
 
-Example: {"validating": 0.6, "logistics_first": 0.3}
+Patient: "Okay, so what am I supposed to do first?"
+Learner: "The first step is a scan on Monday, and the nurse will call you with the time."
+{}
+
+Patient: "[voice breaking] I don't understand any of this."
+Learner: "The oncologist has an opening Thursday morning and we will book your scan today."
+{"logistics_first": 0.8}
+
+Patient: (has not spoken yet)
+Learner: "It's nothing to worry about, these things usually turn out fine."
+{"premature_reassurance": 0.9}
+
+Patient: "[trembling voice] I can't believe this is happening."
+Learner: "That must feel terrifying, and there is no rush, take all the time you need."
+{"validating": 0.8}
+
+Return ONLY a raw JSON object containing the categories that scored above 0. Never use markdown or code fences. Omit every category that scored 0. If nothing applies, return {}.
 """
 
 

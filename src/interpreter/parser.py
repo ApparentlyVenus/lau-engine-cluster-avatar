@@ -21,11 +21,16 @@ def parse_turn_flags(raw_response: str) -> TurnFlags:
     cleaned = raw_response.strip()
     if cleaned.startswith("```"):
         cleaned = cleaned.strip("`")
-        cleaned = cleaned.removeprefix("json")
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
         cleaned = cleaned.strip()
 
+    start = cleaned.find("{")
+    if start == -1:
+        raise InterpreterParseError(f"No JSON object in interpreter response\nRaw response: {raw_response}")
+
     try:
-        data = json.loads(cleaned)
+        data, _ = json.JSONDecoder().raw_decode(cleaned[start:])
     except json.JSONDecodeError as e:
         raise InterpreterParseError(f"Could not parse interpreter response as JSON: {e}\nRaw response: {raw_response}")
 

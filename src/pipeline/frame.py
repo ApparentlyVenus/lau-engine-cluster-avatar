@@ -9,3 +9,4 @@ class StateUpdatedFrame(Frame):
     learner_transcript: str
     escalated: bool
     filler_line: str | None = None
+    history: list | None = None

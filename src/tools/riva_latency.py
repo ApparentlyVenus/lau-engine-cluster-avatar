@@ -131,7 +131,7 @@ def main(argv: list[str]):
         try:
             first_interim, finals = run_clip(asr, config, path)
             rows.append((path, first_interim, finals))
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             print(f"  FAILED: {type(e).__name__}: {e}")
 
     print("\n--- summary ---")

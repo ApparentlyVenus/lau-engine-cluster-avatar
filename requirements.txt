@@ -7,4 +7,6 @@ python-dotenv
 pydantic
 pytest
 httpx
-pipecat-ai[anthropic,elevenlabs,nvidia,silero,local]
+pipecat-ai[anthropic,elevenlabs,nvidia,silero]>=1.10,<1.11
+# Local mic mode only (python src/run.py mic), on your own machine, needs PortAudio first:
+#   pip install pyaudio

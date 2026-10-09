@@ -13,7 +13,11 @@ from pipecat.turns.user_turn_strategies import UserTurnStrategies
 DEFAULT_HOLD_S = 0.6
 
 
-def build_turn_processor(hold_s: float = DEFAULT_HOLD_S, smart: bool = False) -> UserTurnProcessor:
+def build_turn_processor(
+    hold_s: float = DEFAULT_HOLD_S, smart: bool = False, barge_in: bool = False
+) -> UserTurnProcessor:
+    """barge_in: when the learner starts talking, stop her audio and cancel any
+    reply in progress. Off for file runs (nothing is playing); on for live mic."""
     if smart:
         from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import (
             LocalSmartTurnAnalyzerV3,
@@ -28,7 +32,7 @@ def build_turn_processor(hold_s: float = DEFAULT_HOLD_S, smart: bool = False) ->
 
     strategies = UserTurnStrategies(
         start=[
-            VADUserTurnStartStrategy(enable_interruptions=False),
+            VADUserTurnStartStrategy(enable_interruptions=barge_in),
             TranscriptionUserTurnStartStrategy(enable_interruptions=False),
         ],
         stop=[stop],

@@ -10,6 +10,8 @@ from pipecat.frames.frames import (
 )
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 
+from pipeline.timing import TurnTiming, words_from_riva_result
+
 
 class TurnMerger(FrameProcessor):
     def __init__(self, on_event=None, wait_s: float = 0.8, race_s: float = 0.1):
@@ -18,6 +20,10 @@ class TurnMerger(FrameProcessor):
         self.awaiting_final = False
         self.pending_interim = False
         self.fragments: list[str] = []
+        # Word timings from every merged fragment. Riva's times count from the
+        # start of the audio stream, so gaps between fragments (often the
+        # hesitation pauses) come out right too.
+        self.words = []
         self.wait_s = wait_s
         self.race_s = race_s
         self.wait_task: asyncio.Task | None = None
@@ -44,10 +50,12 @@ class TurnMerger(FrameProcessor):
             if self.turn_open:
                 if text:
                     self.fragments.append(text)
+                    self.words.extend(words_from_riva_result(frame.result))
                     self.on_event("held fragment", repr(text))
             elif self.awaiting_final:
                 if text:
                     self.fragments.append(text)
+                    self.words.extend(words_from_riva_result(frame.result))
                     self.on_event("held fragment (after stop)", repr(text))
                 self._cancel_wait()
                 await self._flush(direction)
@@ -83,7 +91,9 @@ class TurnMerger(FrameProcessor):
 
     async def _flush(self, direction: FrameDirection):
         merged = " ".join(self.fragments).strip()
+        words = self.words
         self.fragments = []
+        self.words = []
         self.awaiting_final = False
         self.pending_interim = False
         if not merged:
@@ -95,6 +105,7 @@ class TurnMerger(FrameProcessor):
                 text=merged,
                 user_id="learner",
                 timestamp=datetime.now(timezone.utc).isoformat(),
+                result=TurnTiming(words=words),
                 finalized=True,
             ),
             direction,

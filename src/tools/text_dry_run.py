@@ -58,18 +58,18 @@ async def main(persona_path: str, serial: bool):
         result: dict = {}
 
         async def interpret():
-            raw = await call_interpreter(interp_message)  # noqa: B023
+            raw = await call_interpreter(interp_message)
             flags = parse_turn_flags(raw)
-            timings["interp"] = time.monotonic() - t0 # noqa: B023
-            new_state, escalated = apply_turn(state, flags, persona) # noqa: B023
-            result.update(flags=flags, state=new_state, escalated=escalated) # noqa: B023
-            return build_renderer_message(persona, new_state, transcript, history=snapshot) # noqa: B023
+            timings["interp"] = time.monotonic() - t0
+            new_state, escalated = apply_turn(state, flags, persona)
+            result.update(flags=flags, state=new_state, escalated=escalated)
+            return build_renderer_message(persona, new_state, transcript, history=snapshot)
 
         chunks: list[str] = []
 
         async def emit(chunk):
-            timings.setdefault("first_chunk", time.monotonic() - t0)  # noqa: B023
-            chunks.append(chunk)  # noqa: B023
+            timings.setdefault("first_chunk", time.monotonic() - t0)
+            chunks.append(chunk)
 
         if serial:
             real_message = await interpret()

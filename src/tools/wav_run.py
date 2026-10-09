@@ -1,15 +1,23 @@
+"""Feed recorded clips through the full pipeline and log every stage.
+
+Preferred:  python src/run.py wav clips/a.wav clips/b.wav          (with voice, saves her replies)
+            python src/run.py wav clips/a.wav --no-tts             (text only)
+Old form, still works (text only):
+            python -m tools.wav_run tuning.json clips/a.wav --hold=0.6 --smart
+"""
+
 import asyncio
 import os
 import sys
 import time
 import wave
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 from loguru import logger
-from pipecat.audio.vad.silero import SileroVADAnalyzer
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
@@ -17,38 +25,25 @@ from pipecat.frames.frames import (
     StartFrame,
     TextFrame,
     TranscriptionFrame,
+    TTSAudioRawFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
 )
-from pipecat.pipeline.pipeline import Pipeline
-from pipecat.pipeline.worker import PipelineWorker
-from pipecat.processors.audio.vad_processor import VADProcessor
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
-from pipecat.services.nvidia.stt import NvidiaSTTService
 from pipecat.workers.runner import WorkerRunner
 
 import tracing
-from pipeline.processors import (
-    InterpreterProcessor,
-    InterruptWatcherProcessor,
-    RendererProcessor,
-)
-from pipeline.turn_merger import TurnMerger
-from pipeline.turns import DEFAULT_HOLD_S, build_turn_processor
-from state_engine.config import PersonaConfig
+from pipeline.build import SessionOptions, build_session
+from pipeline.timing import words_from_riva_result
 from tracing import mark
 
-logger.remove()
-logger.add(sys.stderr, level="WARNING")
-
 SAMPLE_RATE = 16000
+OUT_RATE = 24000
 CHUNK_S = 0.1
 TAIL_SILENCE_S = 4.0
 SETTLE_S = 9.0
-
-STARTED = asyncio.Event()
 
 
 def load_clip(path: str) -> bytes:
@@ -75,7 +70,11 @@ class EventProbe(FrameProcessor):
                 mark(self.label, "first interim", repr(frame.text))
         elif isinstance(frame, TranscriptionFrame) and TranscriptionFrame in self.kinds:
             self.interim_seen = False
-            mark(self.label, "FINAL", repr(frame.text))
+            words = words_from_riva_result(frame.result)
+            detail = repr(frame.text)
+            if words:
+                detail += "  words: " + " ".join(f"{w.word}@{w.start_s:.2f}-{w.end_s:.2f}" for w in words)
+            mark(self.label, "FINAL", detail)
         elif isinstance(frame, self.kinds) and not isinstance(frame, TranscriptionFrame):
             if isinstance(frame, VADUserStoppedSpeakingFrame):
                 mark(self.label, type(frame).__name__, key="last_word", overwrite=True)
@@ -85,20 +84,31 @@ class EventProbe(FrameProcessor):
         await self.push_frame(frame, direction)
 
 
-class PrintSink(FrameProcessor):
+class Sink(FrameProcessor):
+    """End of the pipeline in file mode: logs her text, collects her audio."""
+
+    def __init__(self):
+        super().__init__()
+        self.started = asyncio.Event()
+        self.audio = bytearray()
+
     async def process_frame(self, frame: Frame, direction: FrameDirection):
         await super().process_frame(frame, direction)
 
         if isinstance(frame, StartFrame):
-            STARTED.set()
-
-        is_speech = isinstance(frame, TextFrame) and not isinstance(
-            frame, (TranscriptionFrame, InterimTranscriptionFrame)
-        )
-        if is_speech:
-            mark("sink", "TTS would speak", repr(frame.text))
+            self.started.set()
+        elif isinstance(frame, TTSAudioRawFrame):
+            if not self.audio:
+                tracing.audio_started()
+            self.audio.extend(frame.audio)
+        elif type(frame) is TextFrame:
+            mark("sink", "to TTS", repr(frame.text))
 
         await self.push_frame(frame, direction)
+
+    def take_audio(self) -> bytes:
+        audio, self.audio = bytes(self.audio), bytearray()
+        return audio
 
 
 async def feed_clip(worker, pcm: bytes):
@@ -114,11 +124,7 @@ async def feed_clip(worker, pcm: bytes):
             mark("feeder", "audio ends")
             marked_end = True
         await worker.queue_frame(
-            InputAudioRawFrame(
-                audio=padded[offset:offset + chunk_bytes],
-                sample_rate=SAMPLE_RATE,
-                num_channels=1,
-            )
+            InputAudioRawFrame(audio=padded[offset:offset + chunk_bytes], sample_rate=SAMPLE_RATE, num_channels=1)
         )
 
 
@@ -131,58 +137,41 @@ def print_state(state):
     )
 
 
-def parse_args(argv: list[str]):
-    hold = DEFAULT_HOLD_S
-    smart = False
-    positional = []
-    for arg in argv:
-        if arg.startswith("--hold="):
-            hold = float(arg.split("=", 1)[1])
-        elif arg == "--smart":
-            smart = True
-        else:
-            positional.append(arg)
-    return positional[0], positional[1:], hold, smart
+def save_wav(path: Path, pcm: bytes):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(OUT_RATE)
+        wf.writeframes(pcm)
 
 
-async def main(persona_path: str, clips: list[str], hold: float, smart: bool):
-    persona = PersonaConfig.from_file(persona_path)
-
-    vad = VADProcessor(vad_analyzer=SileroVADAnalyzer())
-    stt = NvidiaSTTService(api_key=os.environ["NVIDIA_API_KEY"])
-    turns = build_turn_processor(hold_s=hold, smart=smart)
-    merger = TurnMerger(on_event=lambda event, detail="": mark("merger", event, detail))
-
-    interrupt_watcher = InterruptWatcherProcessor(persona, state_getter=lambda: interpreter.state)
-    interpreter = InterpreterProcessor(persona, filler_getter=lambda: interrupt_watcher.filler_line_this_turn)
-    renderer = RendererProcessor(persona)
-
-    pipeline = Pipeline([
-        vad,
-        EventProbe("vad", (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame)),
-        stt,
-        EventProbe("stt", (TranscriptionFrame,), show_first_interim=True),
-        turns,
-        EventProbe("turn", (UserStartedSpeakingFrame, UserStoppedSpeakingFrame)),
-        merger,
-        interrupt_watcher,
-        interpreter,
-        renderer,
-        PrintSink(),
-    ])
-    worker = PipelineWorker(pipeline)
-    runner = WorkerRunner()
-    await runner.add_workers(worker)
+async def run_clips(persona_path: str, clips: list[str], opts: SessionOptions, out_dir: str = "out"):
+    sink = Sink()
+    probes = {
+        "vad": [EventProbe("vad", (VADUserStartedSpeakingFrame, VADUserStoppedSpeakingFrame))],
+        "stt": [EventProbe("stt", (TranscriptionFrame,), show_first_interim=True)],
+        "turns": [EventProbe("turn", (UserStartedSpeakingFrame, UserStoppedSpeakingFrame))],
+        "output": [sink],
+    }
+    session = build_session(persona_path, opts, probes=probes)
+    runner = WorkerRunner(handle_sigint=False)
+    await runner.add_workers(session.worker)
     run_task = asyncio.create_task(runner.run())
-    await STARTED.wait()
+    await sink.started.wait()
     await asyncio.sleep(0.5)
 
-    print(f"turn end: {'smart turn model' if smart else f'timer, hold {hold}s'}")
+    print(f"turn end: {'smart turn model' if opts.smart_turn else f'timer, hold {opts.hold_s}s'}")
     for path in clips:
         print(f"\n=== {path}")
-        await feed_clip(worker, load_clip(path))
+        await feed_clip(session.worker, load_clip(path))
         await asyncio.sleep(SETTLE_S)
-        print_state(interpreter.state)
+        print_state(session.interpreter.state)
+        audio = sink.take_audio()
+        if audio:
+            out = Path(out_dir) / f"{Path(path).stem}_reply.wav"
+            save_wav(out, audio)
+            print(f"    her reply: {out} ({len(audio) / 2 / OUT_RATE:.1f}s)")
 
     run_task.cancel()
     await asyncio.wait({run_task}, timeout=2)
@@ -190,6 +179,21 @@ async def main(persona_path: str, clips: list[str], hold: float, smart: bool):
     os._exit(0)
 
 
+def parse_args(argv: list[str]):
+    opts = SessionOptions(tts=False, barge_in=False)
+    positional = []
+    for arg in argv:
+        if arg.startswith("--hold="):
+            opts.hold_s = float(arg.split("=", 1)[1])
+        elif arg == "--smart":
+            opts.smart_turn = True
+        else:
+            positional.append(arg)
+    return positional[0], positional[1:], opts
+
+
 if __name__ == "__main__":
-    persona_path, clips, hold, smart = parse_args(sys.argv[1:])
-    asyncio.run(main(persona_path, clips, hold, smart))
+    logger.remove()
+    logger.add(sys.stderr, level="WARNING")
+    persona_path, clips, opts = parse_args(sys.argv[1:])
+    asyncio.run(run_clips(persona_path, clips, opts))

@@ -15,7 +15,11 @@ One extra key is not a behavior score:
 
 answers_question: set to 1.0 only when the patient's most recent line asked a direct question or asked for information (about next steps, timing, what to expect, or anything else), and the learner's turn directly answers it. Leave it out otherwise. Still score every other category normally; this key is applied on top of them.
 
-You only see text, so never infer anything about timing, tone of voice, or talking over her. Consider what the patient herself just said before scoring the learner's response.
+Timing: the learner's turn may contain [pause 1.4s] markers, and there may be a "Measured timing" list. These are measured from the audio, not guessed. Use them only to judge silence_tolerance and to read the learner's words in context:
+- A pause the learner leaves after naming her emotion or after hard news, or a long wait before speaking after she has said something painful, supports silence_tolerance.
+- Hesitation inside a sentence (pausing mid-phrase, filler words) is not silence_tolerance. It is neutral; do not score it as anything.
+- Starting to speak almost immediately after an emotional line from her is not silence_tolerance.
+Never score interruption; talking over her is measured separately. If there are no pause markers and no timing list, timing is unknown: score from the words alone and never guess at pauses or tone of voice. Consider what the patient herself just said before scoring the learner's response.
 
 A turn can score above 0 on more than one category. Most turns score 0 on most categories.
 
@@ -41,19 +45,38 @@ Patient: "[trembling voice] I can't believe this is happening."
 Learner: "That must feel terrifying, and there is no rush, take all the time you need."
 {"validating": 0.8}
 
+Patient: "[voice breaking] I don't understand any of this."
+Learner: "I'm so sorry. [pause 2.4s] This is a lot."
+Measured timing: started speaking 2.1s after she finished.
+{"validating": 0.7, "silence_tolerance": 0.7}
+
+Patient: "[voice breaking] I don't understand any of this."
+Learner: "So the [pause 1.2s] um the scan [pause 0.9s] is on Monday."
+Measured timing: started speaking 0.3s after she finished.
+{"logistics_first": 0.8}
+
 Return ONLY a raw JSON object containing the keys that scored above 0. Never use markdown or code fences. Omit every key that scored 0. If nothing applies, return {}.
 """
 
 
-def build_interpreter_message(persona, transcript: str, history: list[str], max_history_lines: int = 4) -> str:
+def build_interpreter_message(
+    persona,
+    transcript: str,
+    history: list[str],
+    max_history_lines: int = 4,
+    timing: str | None = None,
+) -> str:
+    """`transcript` may already carry [pause Ns] markers; `timing` is the
+    measured-timing list from pipeline.timing.timing_block, or None."""
     trimmed = history[-max_history_lines:] if history else []
     history_block = "\n".join(f"- {line}" for line in trimmed) if trimmed else "(no prior turns)"
+    timing_section = f"\n\nMeasured timing:\n{timing}" if timing else ""
     return f"""{build_scenario_block(persona)}
 
 Conversation history (most recent last):
 {history_block}
 
 Learner's most recent turn:
-"{transcript}"
+"{transcript}"{timing_section}
 
 Classify this turn."""

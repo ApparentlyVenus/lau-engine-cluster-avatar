@@ -60,5 +60,13 @@
     "logistics_first": { "trust": -0.04, "saturation": 0.06, "acknowledges": false },
     "interruption": { "trust": -0.08, "saturation": 0.12, "acknowledges": false },
     "disrespect": { "trust": -0.30, "saturation": 0.40, "acknowledges": false }
-  }
+  },
+    "timing": {
+        "pause_threshold_s": 0.7,
+        "slow_wpm": 100,
+        "fast_wpm": 180,
+        "min_words_for_rate": 6,
+        "talk_over_min_bot_speaking_s": 1.0,
+        "talk_over_flag": 1.0
+    }
 }

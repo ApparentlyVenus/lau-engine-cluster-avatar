@@ -68,5 +68,11 @@
         "min_words_for_rate": 6,
         "talk_over_min_bot_speaking_s": 1.0,
         "talk_over_flag": 1.0
-    }
+    },
+
+  "voice": {
+    "voice_id": "",
+    "model": "eleven_v3_conversational",
+    "stability": 0.5
+}
 }

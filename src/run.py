@@ -8,13 +8,15 @@
 Common options:
     --persona PATH        tuning file (default: src/state_engine/tuning/tuning.json)
     --no-tts              skip ElevenLabs (prints what she would say)
-    --tts-model NAME      eleven_v3_conversational (default, tags performed) or eleven_flash_v2_5 (fastest, tags stripped)
+    --tts-model NAME      override the patient's model for this run: eleven_v3_conversational (tags performed)
+                          or eleven_flash_v2_5 (fastest, tags stripped)
     --hold SECONDS        silence before the turn ends (default 0.6)
     --smart               smart-turn model instead of the silence timer
     --no-barge-in         she finishes her line even if the learner talks over her
     --no-word-times       do not ask Riva for word timestamps
 
-Needs in .env: ANTHROPIC_API_KEY, NVIDIA_API_KEY, and for voice ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID.
+Needs in .env: ANTHROPIC_API_KEY, NVIDIA_API_KEY, and for voice ELEVENLABS_API_KEY.
+Her voice (voice_id, model, stability) is in the patient's tuning file, "voice" section.
 """
 
 import argparse
@@ -33,13 +35,19 @@ load_dotenv()
 DEFAULT_PERSONA = str(SRC / "state_engine" / "tuning" / "tuning.json")
 
 
-def check_env(need_tts: bool):
+def check_env(need_tts: bool, persona_path: str | None = None):
     needed = ["ANTHROPIC_API_KEY", "NVIDIA_API_KEY"]
     if need_tts:
-        needed += ["ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"]
+        needed += ["ELEVENLABS_API_KEY"]
     missing = [k for k in needed if not os.environ.get(k)]
     if missing:
         sys.exit(f"Missing in .env: {', '.join(missing)}" + (" (or run with --no-tts)" if need_tts else ""))
+    if need_tts and persona_path:
+        from pipeline.tts import VoiceConfig
+        try:
+            VoiceConfig.from_tuning_file(persona_path)
+        except ValueError as e:
+            sys.exit(str(e))
 
 
 def make_options(args, barge_in_default: bool):
@@ -114,7 +122,7 @@ def main(argv=None):
         asyncio.run(text_main(args.persona, args.serial))
         return
 
-    check_env(need_tts=not args.no_tts)
+    check_env(need_tts=not args.no_tts, persona_path=args.persona)
     quiet_logs()
 
     if args.mode == "web":

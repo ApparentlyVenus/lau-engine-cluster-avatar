@@ -87,8 +87,8 @@ def build_session(
         ("renderer", [renderer]),
     ]
     if opts.tts:
-        from pipeline.tts import build_tts
-        stages.append(("tts", build_tts(opts.tts_model)))
+        from pipeline.tts import VoiceConfig, build_tts
+        stages.append(("tts", build_tts(VoiceConfig.from_tuning_file(persona_path), opts.tts_model)))
     stages.append(("output", [output_proc] if output_proc else []))
 
     processors: list[FrameProcessor] = []

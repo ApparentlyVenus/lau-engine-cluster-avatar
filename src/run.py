@@ -28,7 +28,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 sys.path.insert(0, str(SRC))
 
-from dotenv import load_dotenv  # noqa: E402
+from dotenv import load_dotenv
 
 load_dotenv()
 

@@ -81,7 +81,7 @@ def summary():
     for fn in _listeners:
         try:
             fn(result)
-        except Exception:
+        except Exception:  # noqa: BLE001, S110
             pass
     for key in [k for k in _marks if k != "last_word"]:
         del _marks[key]

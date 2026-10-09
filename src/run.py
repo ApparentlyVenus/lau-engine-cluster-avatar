@@ -75,7 +75,10 @@ def quiet_logs():
 
 async def run_mic(args):
     try:
-        from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
+        from pipecat.transports.local.audio import (
+            LocalAudioTransport,
+            LocalAudioTransportParams,
+        )
     except ImportError:
         sys.exit(
             "Local mic needs PyAudio (and PortAudio). Inside the devcontainer there is no\n"

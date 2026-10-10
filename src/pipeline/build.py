@@ -22,6 +22,7 @@ from pipeline.processors import (
     TimingTracker,
 )
 from pipeline.timing import TimingConfig
+from pipeline.turn_gate import TurnGate
 from pipeline.turn_merger import TurnMerger
 from pipeline.turns import DEFAULT_HOLD_S, build_turn_processor
 from state_engine.config import PersonaConfig
@@ -67,16 +68,19 @@ def build_session(
     persona = PersonaConfig.from_file(persona_path)
     timing_cfg = TimingConfig.from_tuning_file(persona_path)
 
-    tracker = TimingTracker(timing_cfg)
-    merger = TurnMerger(on_event=lambda event, detail="": mark("merger", event, detail))
+    gate = TurnGate(timing_cfg.commit_after_s, timing_cfg.commit_after_unfinished_s)
+    tracker = TimingTracker(timing_cfg, gate=gate)
+    merger = TurnMerger(on_event=lambda event, detail="": mark("merger", event, detail), gate=gate)
     interrupt_watcher = InterruptWatcherProcessor(persona, state_getter=lambda: interpreter.state)
     interpreter = InterpreterProcessor(
         persona,
         filler_getter=lambda: interrupt_watcher.filler_line_this_turn,
         timing_tracker=tracker,
         timing_cfg=timing_cfg,
+        gate=gate,
     )
-    renderer = RendererProcessor(persona)
+    renderer = RendererProcessor(persona, gate=gate)
+    gate.on_reopen += [interpreter.rollback, renderer.cancel_turn]
 
     stages: list[tuple[str, list[FrameProcessor]]] = [
         ("input", [input_proc] if input_proc else []),

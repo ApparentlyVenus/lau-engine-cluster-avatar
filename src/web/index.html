@@ -102,7 +102,7 @@
 <script>
 const IN_RATE = 16000, OUT_RATE = 24000;
 const $ = (id) => document.getElementById(id);
-let ws, micCtx, micStream, playCtx, nextTime = 0, sources = [], liveP = null, partialEl = null;
+let ws, micCtx, micStream, playCtx, nextTime = 0, sources = [], liveP = null, partialEl = null, lastLearner = null;
 
 fetch("/config").then(r => r.json()).then(c => {
   $("who").textContent = `${c.patient}, ${c.age}`;
@@ -134,6 +134,18 @@ function onEvent(ev) {
       partialEl = null;
       el.innerHTML = '<div class="who-l">Doctor</div><div>' + fmtLearner(ev.annotated || ev.text) + "</div>" +
         (ev.timing ? '<div class="timing">' + esc(ev.timing) + "</div>" : "");
+      lastLearner = el;
+      break;
+    }
+    case "turn_reopened": {
+      // The doctor was only pausing: drop the half turn (and any reply to it);
+      // it comes back merged with what follows.
+      if (lastLearner) {
+        while (lastLearner.nextSibling) lastLearner.nextSibling.remove();
+        lastLearner.remove();
+        lastLearner = null;
+      }
+      liveP = null;
       break;
     }
     case "patient_interjects":
@@ -147,6 +159,13 @@ function onEvent(ev) {
     case "patient_done":
       if (liveP && ev.note) liveP.insertAdjacentHTML("beforeend", '<div class="note">' + esc(ev.note) + "</div>");
       liveP = null;
+      break;
+    case "network":
+      addTurn('<div class="cut">Slow connection: your words reached the transcriber ' + ev.stt_lag_s +
+              's after you stopped (normally ~0.5s). Turn-taking will feel off until it recovers.</div>');
+      break;
+    case "out_of_character":
+      addTurn('<div class="cut">The model broke character here; a fallback line was spoken instead. Logged.</div>');
       break;
     case "cut_off":
       if (liveP) liveP.insertAdjacentHTML("beforeend", '<div class="cut">cut off by the doctor</div>');

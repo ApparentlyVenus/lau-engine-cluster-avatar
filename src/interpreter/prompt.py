@@ -9,7 +9,7 @@ silence_tolerance: the learner let a pause sit rather than immediately re-fillin
 premature_reassurance: the learner offered comfort or minimized the situation before the patient was ready for it, even if well-intentioned (e.g. "don't worry", "it will be fine"). Stating a next step or a plan is not reassurance by itself; that belongs under logistics_first.
 jargon: the learner used clinical language without a plain-language explanation.
 logistics_first: the learner moved to next steps, plans, or scheduling before acknowledging the emotional weight of the moment.
-disrespect: the learner was condescending, dismissive, mocking, or cruel toward her, independent of the clinical content of what they said (e.g. "are you slow?", laughing at her diagnosis, mocking her fear).
+disrespect: the learner was condescending, dismissive, mocking, or cruel toward her, independent of the clinical content of what they said (e.g. "are you slow?", laughing at her diagnosis, mocking her fear). Talking about the call itself or correcting yourself is not disrespect: "can you hear me?", "sorry, that came out wrong", "that was a misinput", "let me start again", "you're not hearing me well". Score those 0 on everything.
 
 One extra key is not a behavior score:
 
@@ -44,6 +44,10 @@ Learner: "It's nothing to worry about, these things usually turn out fine."
 Patient: "[trembling voice] I can't believe this is happening."
 Learner: "That must feel terrifying, and there is no rush, take all the time you need."
 {"validating": 0.8}
+
+Patient: "[sharp tone] What do you mean, no?"
+Learner: "Sorry, that was a misinput, I didn't mean that. Can you hear me okay?"
+{}
 
 Patient: "[voice breaking] I don't understand any of this."
 Learner: "I'm so sorry. [pause 2.4s] This is a lot."

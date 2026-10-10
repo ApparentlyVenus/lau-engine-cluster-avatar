@@ -191,3 +191,108 @@ def test_merger_carries_words_from_all_fragments():
     assert isinstance(final.result, TurnTiming)
     assert [w.word for w in final.result.words] == ["I'm", "sorry", "to", "hear"]
     assert annotate_transcript(final.text, final.result, CFG) == "I'm sorry [pause 1.8s] to hear"
+
+
+# --- voice config in the tuning file ----------------------------------------
+
+def test_voice_config_from_tuning(tmp_path):
+    from pipeline.tts import DEFAULT_MODEL, VoiceConfig
+
+    p = tmp_path / "t.json"
+    p.write_text('{"voice": {"voice_id": "abc123"}}')
+    v = VoiceConfig.from_tuning_file(str(p))
+    assert (v.voice_id, v.model, v.stability) == ("abc123", DEFAULT_MODEL, None)
+
+    p.write_text('{"voice": {"voice_id": "abc", "model": "eleven_flash_v2_5", "stability": 0.3}}')
+    v = VoiceConfig.from_tuning_file(str(p))
+    assert (v.model, v.stability) == ("eleven_flash_v2_5", 0.3)
+
+
+@pytest.mark.parametrize("body", ['{}', '{"voice": {}}', '{"voice": {"voice_id": "  "}}'])
+def test_missing_voice_id_is_a_clear_error(tmp_path, body):
+    from pipeline.tts import VoiceConfig
+
+    p = tmp_path / "t.json"
+    p.write_text(body)
+    with pytest.raises(ValueError, match="voice_id"):
+        VoiceConfig.from_tuning_file(str(p))
+
+
+def test_unknown_voice_key_rejected(tmp_path):
+    from pipeline.tts import VoiceConfig
+
+    p = tmp_path / "t.json"
+    p.write_text('{"voice": {"voice_id": "a", "voiceid": "b"}}')
+    with pytest.raises(ValueError, match="Unknown keys"):
+        VoiceConfig.from_tuning_file(str(p))
+
+
+# --- turn gate --------------------------------------------------------------
+
+@pytest.mark.parametrize("text,unfinished", [
+    ("Uh", True), ("Uh.", True), ("I want you to", True), ("there's a certain mass,", True),
+    ("We found something and", True), ("so the", True), ("The results show a, um", True),
+    ("Can you hear me", False), ("I'm sorry, this must be hard.", False), ("The biopsy showed cancer.", False),
+    ("Okay, go on.", False), ("I know how hard it is", False), ("I'm sorry about that.", False),
+])
+def test_looks_unfinished(text, unfinished):
+    from pipeline.turn_gate import looks_unfinished
+    assert looks_unfinished(text) is unfinished
+
+
+def test_gate_holds_longer_for_unfinished_and_reopens():
+    from pipeline.turn_gate import TurnGate
+
+    gate = TurnGate(commit_after_s=1.0, commit_after_unfinished_s=2.5)
+    gate.learner_stopped()
+    t0 = gate.learner_stopped_at
+    turn = gate.turn_flushed("about the results, uh", ["about the results, uh"], [])
+    assert turn.release_at == pytest.approx(t0 + 2.5)
+    calls = []
+    gate.on_reopen.append(calls.append)
+    gate.attach(7, "undo")
+    assert gate.can_reopen()
+    assert gate.reopen() is turn and turn.reopened and calls == [turn]
+    assert not gate.can_reopen() and gate.reopen() is None
+
+
+def test_gate_release_blocks_reopen():
+    from pipeline.turn_gate import TurnGate
+
+    gate = TurnGate(commit_after_s=0.0)
+    gate.learner_stopped()
+    gate.turn_flushed("Hello.", ["Hello."], [])
+    gate.attach(1, None)
+    asyncio.run(gate.wait_release(1))
+    assert not gate.can_reopen()  # she has started: now it is a barge-in, not a pause
+
+
+# --- out-of-character guard ---------------------------------------------------
+
+@pytest.mark.parametrize("text,ooc", [
+    ("I'm not able to continue this roleplay.", True),
+    ("The learner's dialogue contains abuse I can't engage with.", True),
+    ("As an AI, I won't continue.", True),
+    ("[sharp tone] Get out. I want a different doctor.", False),
+    ("What's the worst-case scenario here?", False),
+    ("I can't believe you just said that to me.", False),
+])
+def test_out_of_character(text, ooc):
+    from pipeline.processors import is_out_of_character
+    assert is_out_of_character(text) is ooc
+
+
+def test_gate_does_not_reopen_after_window():
+    import time as _t
+
+    from pipeline.turn_gate import TurnGate
+
+    gate = TurnGate(commit_after_s=0.05)
+    gate.learner_stopped()
+    gate.turn_flushed("Hello.", ["Hello."], [])
+    gate.attach(1, None)
+    assert gate.can_reopen()
+    _t.sleep(0.08)
+    # Her reply is late (slow network) but the pause window is over: new speech
+    # must be a new turn, not merged across the silence.
+    assert not gate.can_reopen() and gate.reopen() is None

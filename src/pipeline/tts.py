@@ -1,14 +1,34 @@
+"""TTS for her voice. Her voice lives in the patient's tuning file, so every
+patient sounds like herself:
+
+    "voice": {
+        "voice_id": "...",                      ElevenLabs voice ID (required)
+        "model": "eleven_v3_conversational",    optional, default below
+        "stability": 0.5                        optional; lower = more expressive
+    }
+
+Only the API key stays in .env. Models:
+
+eleven_v3_conversational (default) / eleven_v3
+    Performs the bracket tags ([voice breaking], [pause]...). Only reachable
+    through ElevenLabs' Text-to-Dialogue WebSocket, which needs that API enabled
+    for your workspace. Pipecat aggregates its input by sentence, so the
+    renderer's early comma-chunk waits for the end of its sentence here.
+
+eleven_flash_v2_5 (or any Flash/Turbo/Multilingual model)
+    Fastest (~75 ms model time) but reads tags out loud, so they are stripped
+    first and [pause] becomes "...". Text is streamed token by token, so the
+    early first chunk goes out immediately.
+
+`--tts-model` on the command line overrides the model for one run, for A/B tests.
+"""
+
 import json
 import os
 import re
 from dataclasses import dataclass, fields
 
-from pipecat.frames.frames import (
-    Frame,
-    InterimTranscriptionFrame,
-    TextFrame,
-    TranscriptionFrame,
-)
+from pipecat.frames.frames import Frame, InterimTranscriptionFrame, TextFrame, TranscriptionFrame
 from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
 from pipecat.services.tts_service import TextAggregationMode
 
@@ -74,17 +94,17 @@ def build_tts(voice: VoiceConfig, model_override: str | None = None) -> list[Fra
     """Returns the processors to place where TTS goes (one or two)."""
     model = model_override or voice.model
     api_key = os.environ["ELEVENLABS_API_KEY"]
+    # Only for tests against a local fake server.
+    url = {"url": os.environ["ELEVENLABS_WS_URL"]} if os.environ.get("ELEVENLABS_WS_URL") else {}
 
     if is_v3(model):
-        from pipecat.services.elevenlabs.dialogue.tts import (
-            ElevenLabsDialogueTTSService,
-        )
+        from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
 
         settings = ElevenLabsDialogueTTSService.Settings(model=model, voice=voice.voice_id)
         if voice.stability is not None:
             settings.stability = voice.stability
         mark("tts", "ElevenLabs", f"{model}, voice {voice.voice_id} (tags performed)")
-        return [ElevenLabsDialogueTTSService(api_key=api_key, settings=settings)]
+        return [ElevenLabsDialogueTTSService(api_key=api_key, settings=settings, **url)]
 
     from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
 
@@ -97,6 +117,7 @@ def build_tts(voice: VoiceConfig, model_override: str | None = None) -> list[Fra
         ElevenLabsTTSService(
             api_key=api_key,
             settings=settings,
+            **url,
             auto_mode=False,
             text_aggregation_mode=TextAggregationMode.TOKEN,
         ),

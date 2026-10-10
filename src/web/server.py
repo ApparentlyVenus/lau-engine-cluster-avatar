@@ -7,6 +7,8 @@ Each connection is a fresh conversation with a fresh patient state.
 """
 
 import asyncio
+import os
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, WebSocket
@@ -23,6 +25,17 @@ from tracing import mark
 from web.serializer import IN_SAMPLE_RATE, OUT_SAMPLE_RATE, PcmJsonSerializer
 
 PAGE = Path(__file__).with_name("index.html")
+
+
+async def watch_event_loop(period_s: float = 0.1, warn_s: float = 0.25):
+    """Logs when this machine stalls the event loop. A slow turn with no stall
+    logged was the network (Riva, Claude or ElevenLabs), not this process."""
+    while True:
+        start = time.monotonic()
+        await asyncio.sleep(period_s)
+        stall = time.monotonic() - start - period_s
+        if stall > warn_s:
+            mark("machine", "EVENT LOOP STALLED", f"{stall:.2f}s (CPU-bound work is blocking audio)")
 
 
 def create_app(persona_path: str, opts: SessionOptions) -> FastAPI:
@@ -97,11 +110,14 @@ def create_app(persona_path: str, opts: SessionOptions) -> FastAPI:
         runner = WorkerRunner(handle_sigint=False)
         await runner.add_workers(session.worker)
         task = asyncio.create_task(runner.run())
+        watchdog = asyncio.create_task(watch_event_loop())
         active["session"] = task
         try:
             await task
         except asyncio.CancelledError:
             await session.worker.cancel()
+        finally:
+            watchdog.cancel()
 
     return app
 
@@ -111,5 +127,20 @@ def serve(persona_path: str, opts: SessionOptions, host: str, port: int):
 
     print(f"\n  Open http://localhost:{port} in your browser (VSCode forwards the port).")
     print("  Use headphones: without them her voice can leak into the mic and trigger barge-in.\n")
-    uvicorn.run(create_app(persona_path, opts), host=host, port=port, log_level="warning")
+    try:
+        uvicorn.run(
+            create_app(persona_path, opts),
+            host=host,
+            port=port,
+            log_level="warning",
+            lifespan="off",              # no lifespan traceback on Ctrl+C
+            timeout_graceful_shutdown=2,  # do not wait on an open browser socket
+        )
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # Riva's streaming client runs in a background thread that blocks on
+        # its gRPC stream; joining it is what made Ctrl+C hang. Exit directly.
+        print("\n  Stopped.")
+        os._exit(0)
 

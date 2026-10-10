@@ -1,5 +1,6 @@
 import asyncio
 import os
+import re
 import time
 
 from pipecat.frames.frames import (
@@ -8,6 +9,8 @@ from pipecat.frames.frames import (
     Frame,
     InterimTranscriptionFrame,
     InterruptionFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
     OutputTransportMessageUrgentFrame,
     TextFrame,
     TranscriptionFrame,
@@ -42,6 +45,20 @@ from tracing import mark
 
 SPECULATIVE_RENDER = os.environ.get("SPECULATIVE_RENDER", "1") != "0"
 RESUME_WITHIN_S = 0.5
+
+# The renderer occasionally answers as the model instead of as her (usually
+# after abusive input). That must never reach the learner's ears.
+OUT_OF_CHARACTER_FALLBACK = "I'm not doing this. I want to speak to someone else, please."
+_OUT_OF_CHARACTER = re.compile(
+    r"\b(role-?play|simulation|the learner|as an ai|language model|i'?m an ai|"
+    r"i can'?t (engage|continue|help with)|i'?m not able to continue|i won'?t continue|"
+    r"training exercise|in character|out of character)\b",
+    re.IGNORECASE,
+)
+
+
+def is_out_of_character(text: str) -> bool:
+    return bool(_OUT_OF_CHARACTER.search(text))
 
 
 async def send_ui(processor: FrameProcessor, message: dict):
@@ -83,9 +100,10 @@ class TimingTracker(FrameProcessor):
     down and BotStarted/StoppedSpeakingFrame coming up from the output.
     """
 
-    def __init__(self, cfg: TimingConfig):
+    def __init__(self, cfg: TimingConfig, gate=None):
         super().__init__()
         self.cfg = cfg
+        self.gate = gate
         self.bot_speaking = False
         self.bot_started_at: float | None = None
         self.bot_stopped_at: float | None = None
@@ -119,6 +137,8 @@ class TimingTracker(FrameProcessor):
             tracing.begin_turn_if_idle()
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             mark("vad", "learner stopped", key="last_word", overwrite=True)
+            if self.gate is not None:
+                self.gate.learner_stopped()
         elif isinstance(frame, UserStartedSpeakingFrame) and self.current is None:
             # First start of a new learner turn. Later starts in the same turn
             # (resuming after a pause) keep this measurement.
@@ -150,8 +170,11 @@ class InterpreterProcessor(FrameProcessor):
         filler_getter=None,
         timing_tracker: TimingTracker | None = None,
         timing_cfg: TimingConfig | None = None,
+        gate=None,
     ):
         super().__init__()
+        self.gate = gate
+        self.tasks: dict[int, asyncio.Task] = {}
         self.persona = persona
         self.state = build_initial_state(persona)
         self.history: list[str] = []
@@ -179,6 +202,11 @@ class InterpreterProcessor(FrameProcessor):
             mark("interpreter", "empty final skipped")
             return
 
+        gate_turn = getattr(frame.result, "gate_turn", None)
+        if gate_turn is not None and gate_turn.reopened:
+            mark("interpreter", "skipped", "turn was reopened before scoring; it will come back merged")
+            return
+
         self.turn_id += 1
         turn_id = self.turn_id
         mark("interpreter", "final frame in", key="final")
@@ -193,6 +221,9 @@ class InterpreterProcessor(FrameProcessor):
 
         # Built before this turn's line is added to history.
         message = build_interpreter_message(self.persona, annotated, self.history, timing=measured)
+        if self.gate is not None:
+            # Everything needed to undo this turn if the learner was only pausing.
+            self.gate.attach(turn_id, (self.state, len(self.history), timing.live))
         self.history.append(f"Learner: {frame.text}")
         filler_line = self.filler_getter() if self.filler_getter else None
 
@@ -227,7 +258,26 @@ class InterpreterProcessor(FrameProcessor):
             await _after(previous)
             await self._interpret(turn_id, message, frame.text, filler_line, measured_flags, direction)
 
-        self.last_task = asyncio.create_task(run())
+        task = asyncio.create_task(run())
+        self.tasks[turn_id] = task
+        task.add_done_callback(lambda _t, tid=turn_id: self.tasks.pop(tid, None))
+        self.last_task = task
+
+    def rollback(self, gate_turn):
+        """The learner kept talking: forget this turn ever happened. The merger
+        sends it again, merged with what follows."""
+        if gate_turn.undo is None:
+            return  # never scored; the interpreter will skip it on arrival
+        state, history_len, live = gate_turn.undo
+        task = self.tasks.pop(gate_turn.turn_id, None)
+        if task is not None and not task.done():
+            task.cancel()
+        self.state = state
+        del self.history[history_len:]
+        if self.timing_tracker is not None:
+            # Keep the gap measured at the start of the turn, not at the resume.
+            self.timing_tracker.current = live
+        mark("interpreter", "rolled back", f"turn {gate_turn.turn_id}")
 
     def _turn_timing(self, frame: TranscriptionFrame) -> TurnTiming:
         if isinstance(frame.result, TurnTiming):
@@ -297,9 +347,17 @@ class RendererProcessor(FrameProcessor):
     as cut off, so the next line knows she was interrupted.
     """
 
-    def __init__(self, persona: PersonaConfig, speculative: bool = SPECULATIVE_RENDER):
+    def __init__(self, persona: PersonaConfig, speculative: bool = SPECULATIVE_RENDER, gate=None):
         super().__init__()
         self.persona = persona
+        self.gate = gate
+        self.active_turn: int | None = None
+        self.released = True
+        self.out_of_character = False
+        # TTS services only flush to ElevenLabs on LLMFullResponseEndFrame, so
+        # every reply is framed Start -> text -> End. Without the End the text
+        # sits in ElevenLabs' buffer and no audio comes back.
+        self.response_open = False
         self.speculative = speculative
         self.pending: dict[int, asyncio.Future] = {}
         self.last_task: asyncio.Task | None = None
@@ -348,6 +406,7 @@ class RendererProcessor(FrameProcessor):
             await self.push_frame(frame, direction)
 
     async def _cut_off(self):
+        self.response_open = False  # the InterruptionFrame resets the TTS turn
         if self.active is None and self.bot_speaking and self.last_history:
             # Fully generated but still being spoken: the learner did not hear
             # all of it, and the next line should know she was cut off.
@@ -386,6 +445,8 @@ class RendererProcessor(FrameProcessor):
                 raise
             except Exception as e:
                 mark("renderer", "FAILED", repr(e))
+                self.active = None
+                await self._close_response()
 
         task = asyncio.create_task(run())
         self.tasks.add(task)
@@ -398,13 +459,57 @@ class RendererProcessor(FrameProcessor):
         )
 
     async def _emit(self, chunk: str, direction: FrameDirection):
+        if not self.released:
+            # Her reply is ready; wait until the learner has really finished.
+            if self.gate is not None and self.active_turn is not None:
+                await self.gate.wait_release(self.active_turn)
+            self.released = True
+        if self.out_of_character:
+            return  # rest of an out-of-character reply: never spoken
+        if is_out_of_character(chunk):
+            self.out_of_character = True
+            mark("renderer", "OUT OF CHARACTER", f"model broke character, replaced: {chunk!r}")
+            await send_ui(self, {"type": "out_of_character", "text": chunk})
+            chunk = OUT_OF_CHARACTER_FALLBACK
         if self.active is not None:
             self.active[1].append(chunk)
         mark("renderer", "chunk -> TTS", repr(chunk), key="first_chunk")
         await send_ui(self, {"type": "patient_chunk", "text": chunk})
-        await self.push_frame(TextFrame(text=chunk), direction)
+        if not self.response_open:
+            self.response_open = True
+            await self.push_frame(LLMFullResponseStartFrame(), FrameDirection.DOWNSTREAM)
+        # Trailing space: the TTS aggregates by concatenating frames verbatim.
+        await self.push_frame(TextFrame(text=chunk + " "), direction)
+
+    async def _close_response(self):
+        if self.response_open:
+            self.response_open = False
+            await self.push_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
+
+    def _start_render(self, turn_id, history):
+        self.active = (history, [])
+        self.active_turn = turn_id
+        self.released = self.gate is None
+        self.out_of_character = False
+
+    def cancel_turn(self, gate_turn):
+        """Gate callback: the learner kept talking before she spoke."""
+        if gate_turn.turn_id is None:
+            return
+        self.cancel_upto = max(self.cancel_upto, gate_turn.turn_id)
+        self.active = None
+        self.response_open = False  # nothing was sent yet: release comes before the first chunk
+        for task in list(self.tasks):
+            task.cancel()
+        for future in self.pending.values():
+            if not future.done():
+                future.cancel()
+        self.pending.clear()
 
     async def _finish(self, history: list, line: str, extra: str = ""):
+        if self.out_of_character:
+            line = OUT_OF_CHARACTER_FALLBACK
+        await self._close_response()
         self.active = None
         mark("renderer", "stream done", extra, key="render_done")
         history.append(f"Patient: {line.strip()}")
@@ -417,7 +522,7 @@ class RendererProcessor(FrameProcessor):
             return
         history = frame.history if frame.history is not None else []
         snapshot = list(history)
-        self.active = (history, [])
+        self._start_render(frame.turn_id, history)
         spec_message = self._message(frame.predicted_state, frame.learner_transcript, snapshot, frame.filler_line)
         mark("renderer", "spec API call ->", f"{RENDERER_MODEL}, {len(spec_message)} chars")
 
@@ -439,7 +544,7 @@ class RendererProcessor(FrameProcessor):
         if frame.turn_id is not None and frame.turn_id <= self.cancel_upto:
             return
         history = frame.history if frame.history is not None else []
-        self.active = (history, [])
+        self._start_render(frame.turn_id, history)
         message = self._message(frame.state, frame.learner_transcript, history, frame.filler_line)
         mark("renderer", "API call ->", f"{RENDERER_MODEL}, {len(message)} chars")
 
@@ -493,7 +598,10 @@ class InterruptWatcherProcessor(FrameProcessor):
                         self.filler_line_this_turn = filler
                         mark("interrupt", "FIRED", f"{category}: {filler!r}")
                         await send_ui(self, {"type": "patient_interjects", "text": filler})
-                        await self.push_frame(TextFrame(text=filler), FrameDirection.DOWNSTREAM)
+                        down = FrameDirection.DOWNSTREAM
+                        await self.push_frame(LLMFullResponseStartFrame(), down)
+                        await self.push_frame(TextFrame(text=filler), down)
+                        await self.push_frame(LLMFullResponseEndFrame(), down)
 
         elif isinstance(frame, TranscriptionFrame):
             self.turn_start_time = None

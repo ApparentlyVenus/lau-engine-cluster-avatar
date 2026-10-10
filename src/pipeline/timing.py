@@ -35,6 +35,11 @@ class TimingConfig:
     talk_over_min_bot_speaking_s: float = 1.0
     # Strength of the measured interruption flag.
     talk_over_flag: float = 1.0
+    # Her reply is held until the learner has been quiet this long; if they
+    # speak again first, the turn reopens and merges (see pipeline.turn_gate).
+    commit_after_s: float = 1.0
+    # ...and this long when the turn so far ends on "uh", "and", "the", a comma...
+    commit_after_unfinished_s: float = 2.5
 
     @classmethod
     def from_tuning_file(cls, path: str) -> "TimingConfig":
@@ -84,6 +89,9 @@ class LiveTiming:
 class TurnTiming:
     words: list[Word] = field(default_factory=list)
     live: LiveTiming = field(default_factory=LiveTiming)
+    # The gate's record of this turn, so a turn reopened before the
+    # interpreter saw it can be skipped.
+    gate_turn: object = None
 
     def pauses(self, cfg: TimingConfig) -> list[tuple[int, float]]:
         """(index of the word the pause comes after, length in seconds)."""

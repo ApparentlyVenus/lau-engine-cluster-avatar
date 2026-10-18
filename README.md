@@ -18,9 +18,9 @@ cp .env.example .env      # fill in the three API keys
 
 | Command | What it does |
 |---|---|
-| `python src/run.py web` | The web app at http://localhost:7860: pick a patient and talk to her, or create and edit patients. Works in the devcontainer (VSCode forwards the port). Use headphones. |
+| `python src/run.py web` | The web app at http://localhost:7860: pick a patient and talk, or create and edit patients. Works in the devcontainer (VSCode forwards the port). Use headphones. |
 | `python src/run.py mic` | Local mic and speakers via PyAudio. Run on your own machine, not in Docker. |
-| `python src/run.py wav clips/a.wav clips/b.wav` | Recorded clips through the full pipeline; her replies saved to `out/`, latency measured to her first audio. |
+| `python src/run.py wav clips/a.wav clips/b.wav` | Recorded clips through the full pipeline; replies saved to `out/`, latency measured to her first audio. |
 | `python src/run.py text` | Type the doctor's lines. No audio. |
 
 Useful options: `--no-tts`, `--tts-model eleven_flash_v2_5`, `--hold 0.8`, `--smart`, `--no-barge-in`, `--no-word-times`. See `python src/run.py --help`.

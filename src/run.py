@@ -1,6 +1,6 @@
 """Run the whole patient pipeline. One entry point, four ways in:
 
-    python src/run.py web                      the web app: pick a character, talk to her, create and edit characters
+    python src/run.py web                      the web app: pick a character, talk to, create and edit characters
                                                (default; works in the devcontainer)
     python src/run.py mic                      local mic + speakers via PyAudio (run on your own machine, not in Docker)
     python src/run.py wav clips/a.wav ...      recorded clips in, her replies saved as .wav, full latency incl. TTS
@@ -31,7 +31,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 sys.path.insert(0, str(SRC))
 
-from dotenv import load_dotenv  # noqa: E402
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -78,7 +78,10 @@ def quiet_logs():
 
 async def run_mic(args):
     try:
-        from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
+        from pipecat.transports.local.audio import (
+            LocalAudioTransport,
+            LocalAudioTransportParams,
+        )
     except ImportError:
         sys.exit(
             "Local mic needs PyAudio (and PortAudio). Inside the devcontainer there is no\n"

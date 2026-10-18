@@ -19,21 +19,47 @@ class TuningValidationError(Exception):
     pass
 
 
+TOP_LEVEL_KEYS = {
+    "scenario", "severity_scale", "audio_tags", "personality", "interruption",
+    "initial_state", "flag_deltas", "timing", "voice",
+}
+TIMING_KEYS = {
+    "pause_threshold_s", "slow_wpm", "fast_wpm", "min_words_for_rate",
+    "talk_over_min_bot_speaking_s", "talk_over_flag", "commit_after_s", "commit_after_unfinished_s",
+}
+VOICE_KEYS = {"voice_id", "model", "stability"}
+
+
 def validate_tuning_file(path: str) -> None:
     with open(path, "r") as f:
         tuning = json.load(f)
-
-    errors = []
-    errors += _validate_scenario(tuning)
-    errors += _validate_severity_scale(tuning)
-    errors += _validate_audio_tags(tuning)
-    errors += _validate_personality(tuning)
-    errors += _validate_interruption(tuning)
-    errors += _validate_initial_state(tuning)
-    errors += _validate_flag_deltas(tuning)
-
+    errors = validate_tuning(tuning)
     if errors:
         raise TuningValidationError("\n".join(errors))
+
+
+def validate_tuning(tuning) -> list[str]:
+    """Every problem in a character file, as a list of messages. Empty = valid."""
+    if not isinstance(tuning, dict):
+        return ["The file must be a JSON object"]
+    errors = []
+    unknown = set(tuning) - TOP_LEVEL_KEYS
+    if unknown:
+        errors.append(f"Unknown top-level keys: {sorted(unknown)}")
+    for check in (
+        _validate_scenario, _validate_severity_scale, _validate_audio_tags, _validate_personality,
+        _validate_interruption, _validate_initial_state, _validate_flag_deltas, _validate_timing, _validate_voice,
+    ):
+        try:
+            errors += check(tuning)
+        except (TypeError, AttributeError, KeyError) as e:
+            # A value of the wrong type (a string where a number belongs...).
+            errors.append(f"{check.__name__.removeprefix('_validate_')}: wrong value type ({e})")
+    return errors
+
+
+def _num(value) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
 def _validate_scenario(tuning: dict) -> list[str]:
@@ -44,8 +70,12 @@ def _validate_scenario(tuning: dict) -> list[str]:
     for key in ("patient_name", "age", "prompt"):
         if key not in scenario:
             errors.append(f"Missing scenario.{key}")
-    if "age" in scenario and not isinstance(scenario["age"], int):
+    if "age" in scenario and (not isinstance(scenario["age"], int) or isinstance(scenario["age"], bool)):
         errors.append("scenario.age must be an integer")
+    if "patient_name" in scenario and (not isinstance(scenario["patient_name"], str) or not scenario["patient_name"].strip()):
+        errors.append("scenario.patient_name must not be empty")
+    if "prompt" in scenario and not isinstance(scenario["prompt"], str):
+        errors.append("scenario.prompt must be text")
     return errors
 
 
@@ -115,6 +145,10 @@ def _validate_personality(tuning: dict) -> list[str]:
     for key in ("acknowledgment_intensity_threshold", "defense_trigger_trust"):
         if key in personality and not (0.0 <= personality[key] <= 1.0):
             errors.append(f"personality.{key} must be between 0 and 1")
+
+    for key in ("trust_penalty", "saturation_penalty"):
+        if key in personality and (not _num(personality[key]) or not -1.0 <= personality[key] <= 1.0):
+            errors.append(f"personality.{key} must be a number between -1 and 1")
 
     return errors
 
@@ -209,11 +243,60 @@ def _validate_flag_deltas(tuning: dict) -> list[str]:
                 errors.append(f"flag_deltas.{flag_name} missing {key}")
         if "acknowledges" in rule and not isinstance(rule["acknowledges"], bool):
             errors.append(f"flag_deltas.{flag_name}.acknowledges must be true/false")
+        for key in ("trust", "saturation"):
+            if key in rule and (not _num(rule[key]) or not -1.0 <= rule[key] <= 1.0):
+                errors.append(f"flag_deltas.{flag_name}.{key} must be a number between -1 and 1")
 
     unexpected = set(deltas.keys()) - set(REQUIRED_FLAGS)
     if unexpected:
         errors.append(f"flag_deltas has unexpected keys: {sorted(unexpected)}")
 
+    return errors
+
+
+def _validate_timing(tuning: dict) -> list[str]:
+    """Optional section; defaults live in pipeline.timing.TimingConfig."""
+    timing = tuning.get("timing")
+    if timing is None:
+        return []
+    if not isinstance(timing, dict):
+        return ["timing must be an object"]
+    errors = []
+    unknown = set(timing) - TIMING_KEYS
+    if unknown:
+        errors.append(f"timing has unknown keys: {sorted(unknown)}")
+    for key, value in timing.items():
+        if key in TIMING_KEYS and (not _num(value) or value < 0):
+            errors.append(f"timing.{key} must be a non-negative number")
+    if "min_words_for_rate" in timing and not isinstance(timing["min_words_for_rate"], int):
+        errors.append("timing.min_words_for_rate must be a whole number")
+    if _num(timing.get("slow_wpm")) and _num(timing.get("fast_wpm")) and timing["slow_wpm"] >= timing["fast_wpm"]:
+        errors.append("timing.slow_wpm must be below timing.fast_wpm")
+    if (_num(timing.get("commit_after_s")) and _num(timing.get("commit_after_unfinished_s"))
+            and timing["commit_after_unfinished_s"] < timing["commit_after_s"]):
+        errors.append("timing.commit_after_unfinished_s must be at least timing.commit_after_s")
+    return errors
+
+
+def _validate_voice(tuning: dict) -> list[str]:
+    """Optional section (only needed with TTS). An empty voice_id is allowed
+    here so a character can be drafted before a voice is picked."""
+    voice = tuning.get("voice")
+    if voice is None:
+        return []
+    if not isinstance(voice, dict):
+        return ["voice must be an object"]
+    errors = []
+    unknown = set(voice) - VOICE_KEYS
+    if unknown:
+        errors.append(f"voice has unknown keys: {sorted(unknown)}")
+    if "voice_id" in voice and not isinstance(voice["voice_id"], str):
+        errors.append("voice.voice_id must be a string")
+    if "model" in voice and (not isinstance(voice["model"], str) or not voice["model"].startswith("eleven_")):
+        errors.append("voice.model must be an ElevenLabs model id such as eleven_v3_conversational")
+    stability = voice.get("stability")
+    if stability is not None and (not _num(stability) or not 0.0 <= stability <= 1.0):
+        errors.append("voice.stability must be between 0 and 1")
     return errors
 
 

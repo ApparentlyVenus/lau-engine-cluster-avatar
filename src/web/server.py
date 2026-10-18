@@ -1,9 +1,16 @@
-"""Browser mic mode. Serves one page and one WebSocket.
+"""The web app: talk to a patient, and create or edit patients.
+
+    /                       the app (static/index.html)
+    /ws?character=ID        one live session with that character
+    /api/characters...      list, read, save, create, delete characters
+    /api/validate           check a character without saving it
+    /api/voice-test         speak a sample line in a voice (ElevenLabs HTTP)
 
 Works inside the devcontainer: audio travels over the WebSocket (TCP), which
 VSCode forwards like any other port. WebRTC would need UDP, which it does not.
 
-Each connection is a fresh conversation with a fresh patient state.
+Each connection is a fresh conversation with a fresh patient state, loaded
+from the character file when the session starts.
 """
 
 import asyncio
@@ -11,8 +18,10 @@ import os
 import time
 from pathlib import Path
 
-from fastapi import FastAPI, WebSocket
-from fastapi.responses import HTMLResponse
+import httpx
+from fastapi import Body, FastAPI, WebSocket
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
 from pipecat.frames.frames import OutputTransportMessageUrgentFrame
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
 from pipecat.workers.runner import WorkerRunner
@@ -21,10 +30,13 @@ import tracing
 from pipeline.build import SessionOptions, build_session
 from pipeline.processors import state_summary
 from state_engine.config import PersonaConfig
+from state_engine.validate import validate_tuning
 from tracing import mark
+from web.characters import CharacterError, CharacterStore, warnings_for
 from web.serializer import IN_SAMPLE_RATE, OUT_SAMPLE_RATE, PcmJsonSerializer
 
-PAGE = Path(__file__).with_name("index.html")
+STATIC = Path(__file__).with_name("static")
+ELEVEN_API = "https://api.elevenlabs.io"
 
 
 async def watch_event_loop(period_s: float = 0.1, warn_s: float = 0.25):
@@ -38,25 +50,88 @@ async def watch_event_loop(period_s: float = 0.1, warn_s: float = 0.25):
             mark("machine", "EVENT LOOP STALLED", f"{stall:.2f}s (CPU-bound work is blocking audio)")
 
 
-def create_app(persona_path: str, opts: SessionOptions) -> FastAPI:
+def create_app(characters_dir: str, default_character: str, opts: SessionOptions) -> FastAPI:
     app = FastAPI()
-    persona = PersonaConfig.from_file(persona_path)
+    store = CharacterStore(characters_dir)
     active: dict[str, asyncio.Task] = {}
+
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+    @app.exception_handler(CharacterError)
+    async def character_error(_request, e: CharacterError):
+        return JSONResponse({"error": str(e), "errors": e.errors}, status_code=e.status)
 
     @app.get("/")
     async def index():
-        return HTMLResponse(PAGE.read_text())
+        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-store"})
 
     @app.get("/config")
     async def config():
         return {
-            "patient": persona.scenario.patient_name,
-            "age": persona.scenario.age,
+            "default_character": default_character,
             "barge_in": opts.barge_in,
             "tts": opts.tts,
             "in_rate": IN_SAMPLE_RATE,
             "out_rate": OUT_SAMPLE_RATE,
         }
+
+    # --- characters ---------------------------------------------------------
+
+    @app.get("/api/characters")
+    async def list_characters():
+        return store.list()
+
+    @app.get("/api/characters/{char_id}")
+    async def get_character(char_id: str):
+        return store.get(char_id)
+
+    @app.put("/api/characters/{char_id}")
+    async def save_character(char_id: str, data: dict = Body(...)):
+        store.existing_path(char_id)
+        return store.save(char_id, data)
+
+    @app.post("/api/characters")
+    async def create_character(data: dict = Body(...)):
+        return store.create(data)
+
+    @app.delete("/api/characters/{char_id}")
+    async def delete_character(char_id: str):
+        store.delete(char_id)
+        return {"deleted": char_id}
+
+    @app.post("/api/validate")
+    async def validate(data: dict = Body(...)):
+        return {"errors": validate_tuning(data), "warnings": warnings_for(data)}
+
+    @app.post("/api/voice-test")
+    async def voice_test(body: dict = Body(...)):
+        """Speaks a sample line in the given voice settings, so a voice can be
+        heard before saving. v3 tags are performed; costs a few characters."""
+        key = os.environ.get("ELEVENLABS_API_KEY")
+        if not key:
+            return JSONResponse({"error": "ELEVENLABS_API_KEY is not set in .env"}, status_code=400)
+        voice = body.get("voice") or {}
+        voice_id = str(voice.get("voice_id", "")).strip()
+        if not voice_id:
+            return JSONResponse({"error": "Set a voice_id first"}, status_code=400)
+        model = voice.get("model") or "eleven_v3_conversational"
+        # The conversational v3 model is only served over the dialogue
+        # WebSocket; plain v3 over HTTP sounds the same for a sample.
+        http_model = "eleven_v3" if model.startswith("eleven_v3") else model
+        payload = {"text": str(body.get("text") or "I came here thinking it was nothing.")[:300], "model_id": http_model}
+        if voice.get("stability") is not None:
+            payload["voice_settings"] = {"stability": voice["stability"]}
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(
+                f"{ELEVEN_API}/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128",
+                headers={"xi-api-key": key},
+                json=payload,
+            )
+        if r.status_code != 200:
+            return JSONResponse({"error": f"ElevenLabs answered {r.status_code}: {r.text[:300]}"}, status_code=502)
+        return Response(r.content, media_type="audio/mpeg")
+
+    # --- live session -------------------------------------------------------
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
@@ -71,6 +146,19 @@ def create_app(persona_path: str, opts: SessionOptions) -> FastAPI:
         barge = websocket.query_params.get("barge_in")
         if barge is not None:
             session_opts.barge_in = barge == "1"
+
+        char_id = websocket.query_params.get("character") or default_character
+        try:
+            persona_path = str(store.existing_path(char_id))
+            persona = PersonaConfig.from_file(persona_path)
+            if session_opts.tts:
+                from pipeline.tts import VoiceConfig
+                VoiceConfig.from_tuning_file(persona_path)
+        except (CharacterError, ValueError) as e:
+            await websocket.send_json({"type": "error", "message": str(e)})
+            await websocket.close()
+            return
+        mark("web", "character", f"{char_id} ({persona.scenario.patient_name})")
 
         transport = FastAPIWebsocketTransport(
             websocket=websocket,
@@ -122,14 +210,14 @@ def create_app(persona_path: str, opts: SessionOptions) -> FastAPI:
     return app
 
 
-def serve(persona_path: str, opts: SessionOptions, host: str, port: int):
+def serve(characters_dir: str, default_character: str, opts: SessionOptions, host: str, port: int):
     import uvicorn
 
     print(f"\n  Open http://localhost:{port} in your browser (VSCode forwards the port).")
     print("  Use headphones: without them her voice can leak into the mic and trigger barge-in.\n")
     try:
         uvicorn.run(
-            create_app(persona_path, opts),
+            create_app(characters_dir, default_character, opts),
             host=host,
             port=port,
             log_level="warning",

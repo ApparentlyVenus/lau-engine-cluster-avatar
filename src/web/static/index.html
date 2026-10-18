@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Patient Simulator</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>Patient simulator</h1>
+  <nav>
+    <a href="#session" id="nav-session">Session</a>
+    <a href="#characters" id="nav-characters">Characters</a>
+  </nav>
+  <span class="spacer"></span>
+  <label class="inline">Patient <select id="character"></select></label>
+</header>
+
+<!-- ===== Session =========================================================== -->
+<div id="view-session">
+  <div class="toolbar">
+    <span><span class="who" id="who"></span><span class="sub" id="who-sub"></span></span>
+    <span class="spacer"></span>
+    <label class="inline">mic <span class="meter"><i id="level"></i></span></label>
+    <label class="inline"><input type="checkbox" id="barge"> barge-in</label>
+    <button id="go">Start</button>
+  </div>
+  <main class="session">
+    <section id="log"><p class="empty">Pick a patient, press Start, allow the microphone, and speak as the doctor. Headphones recommended.</p></section>
+    <aside class="side">
+      <div class="card">
+        <h2>Her state</h2>
+        <div class="emotion" id="emotion">–</div>
+        <div class="note" id="undertone"></div>
+        <div class="row"><span>Trust</span><b id="trust">–</b></div>
+        <div class="bar" id="trustbar"><i></i></div>
+        <div class="row"><span>Saturation</span><b id="sat">–</b></div>
+        <div class="bar" id="satbar"><i></i></div>
+        <div class="row"><span>Defense</span><b id="defense">–</b></div>
+        <div class="row"><span>Unacknowledged turns</span><b id="unack">–</b></div>
+      </div>
+      <div class="card">
+        <h2>Last turn scored</h2>
+        <div class="chips" id="flags"><span class="empty">none yet</span></div>
+      </div>
+      <div class="card">
+        <h2>Last turn latency</h2>
+        <div class="lat" id="lat"><span class="empty">none yet</span></div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<!-- ===== Characters ======================================================== -->
+<div id="view-characters" hidden>
+  <div class="studio">
+    <div class="roster">
+      <div id="roster-list"></div>
+      <div class="actions">
+        <button class="small" id="new-char">New</button>
+        <button class="small ghost" id="import-char">Import JSON</button>
+        <input type="file" id="import-file" accept=".json,application/json" hidden>
+      </div>
+    </div>
+    <div class="editor" id="editor"></div>
+    <div class="status">
+      <div class="card">
+        <p class="big" id="st-name">–</p>
+        <div class="sub" id="st-file"></div>
+        <div id="st-check"></div>
+      </div>
+      <div class="card buttons">
+        <button id="save">Save</button>
+        <div class="twin">
+          <button class="ghost" id="revert">Revert</button>
+          <button class="ghost" id="duplicate">Duplicate</button>
+        </div>
+        <div class="twin">
+          <button class="ghost" id="export">Export JSON</button>
+          <button class="danger" id="delete">Delete</button>
+        </div>
+        <button class="ghost" id="talk">Talk to her</button>
+      </div>
+      <div class="card">
+        <h2>At a glance</h2>
+        <table class="summary" id="st-summary"></table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+<script src="/static/session.js"></script>
+<script src="/static/characters.js"></script>
+</body>
+</html>

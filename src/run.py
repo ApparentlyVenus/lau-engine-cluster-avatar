@@ -1,12 +1,15 @@
 """Run the whole patient pipeline. One entry point, four ways in:
 
-    python src/run.py web                      browser mic + speakers (default; works in the devcontainer)
+    python src/run.py web                      the web app: pick a character, talk to her, create and edit characters
+                                               (default; works in the devcontainer)
     python src/run.py mic                      local mic + speakers via PyAudio (run on your own machine, not in Docker)
     python src/run.py wav clips/a.wav ...      recorded clips in, her replies saved as .wav, full latency incl. TTS
     python src/run.py text                     typed lines, no audio at all
 
 Common options:
     --persona PATH        tuning file (default: src/state_engine/tuning/tuning.json)
+                          web mode: the character selected when the page opens
+    --characters DIR      web mode: folder of character files (default: the --persona file's folder)
     --no-tts              skip ElevenLabs (prints what she would say)
     --tts-model NAME      override the patient's model for this run: eleven_v3_conversational (tags performed)
                           or eleven_flash_v2_5 (fastest, tags stripped)
@@ -28,7 +31,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 sys.path.insert(0, str(SRC))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
@@ -75,10 +78,7 @@ def quiet_logs():
 
 async def run_mic(args):
     try:
-        from pipecat.transports.local.audio import (
-            LocalAudioTransport,
-            LocalAudioTransportParams,
-        )
+        from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
     except ImportError:
         sys.exit(
             "Local mic needs PyAudio (and PortAudio). Inside the devcontainer there is no\n"
@@ -107,6 +107,7 @@ def main(argv=None):
     parser.add_argument("mode", nargs="?", default="web", choices=["web", "mic", "wav", "text"])
     parser.add_argument("clips", nargs="*", help="wav mode: 16 kHz mono 16-bit clips")
     parser.add_argument("--persona", default=DEFAULT_PERSONA)
+    parser.add_argument("--characters", default=None, help="web mode: folder of character files")
     parser.add_argument("--no-tts", action="store_true")
     parser.add_argument("--tts-model", default=None)
     parser.add_argument("--hold", type=float, default=None)
@@ -125,12 +126,17 @@ def main(argv=None):
         asyncio.run(text_main(args.persona, args.serial))
         return
 
-    check_env(need_tts=not args.no_tts, persona_path=args.persona)
+    # Web mode checks each character's voice when its session starts, so one
+    # character without a voice does not stop the app.
+    check_env(need_tts=not args.no_tts, persona_path=None if args.mode == "web" else args.persona)
     quiet_logs()
 
     if args.mode == "web":
         from web.server import serve
-        serve(args.persona, make_options(args, barge_in_default=True), args.host, args.port)
+        persona = Path(args.persona).resolve()
+        characters = Path(args.characters).resolve() if args.characters else persona.parent
+        default = persona.stem if persona.parent == characters else ""
+        serve(str(characters), default, make_options(args, barge_in_default=True), args.host, args.port)
     elif args.mode == "mic":
         asyncio.run(run_mic(args))
     elif args.mode == "wav":

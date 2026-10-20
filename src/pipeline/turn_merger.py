@@ -111,7 +111,12 @@ class TurnMerger(FrameProcessor):
         self.awaiting_final = False
         self.pending_interim = False
         if not merged:
-            self.on_event("turn closed with no text")
+            # VAD heard sound but Riva sent no words. Once is a cough; every
+            # turn means speech-to-text is down (run src/tools/riva_check.py).
+            self.on_event("turn closed with no text", "Riva returned nothing for this speech")
+            await self.push_frame(
+                OutputTransportMessageUrgentFrame(message={"type": "stt_empty"}), FrameDirection.DOWNSTREAM
+            )
             return
         self.on_event("merged final", repr(merged))
         timing = TurnTiming(words=words)

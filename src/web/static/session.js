@@ -1,6 +1,7 @@
 // Session view: mic in, her voice out, live transcript and state.
 const Session = (() => {
   const IN_RATE = 16000, OUT_RATE = 24000;
+  let sttEmpty = 0;
   let ws, micCtx, micStream, playCtx, nextTime = 0, sources = [], liveP = null, partialEl = null, lastLearner = null;
 
   // ---- who we are talking to ---------------------------------------------
@@ -71,6 +72,11 @@ const Session = (() => {
       case "network":
         addTurn('<div class="cut">Slow connection: your words reached the transcriber ' + ev.stt_lag_s +
                 "s after you stopped (normally ~0.5s). Turn-taking will feel off until it recovers.</div>");
+        break;
+      case "stt_empty":
+        sttEmpty += 1;
+        addTurn('<div class="cut">Heard you, but speech-to-text returned no words' +
+                (sttEmpty > 1 ? ` (${sttEmpty} times now). Riva may be down: run <code>python src/tools/riva_check.py</code>.` : ".") + "</div>");
         break;
       case "out_of_character":
         addTurn('<div class="cut">The model broke character here; a fallback line was spoken instead. Logged.</div>');
@@ -171,6 +177,7 @@ const Session = (() => {
   async function start() {
     if (!App.selected) throw new Error("No patient selected");
     $("log").innerHTML = "";
+    sttEmpty = 0;
     resetPanels();
     playCtx = new AudioContext({ sampleRate: OUT_RATE });
     micStream = await navigator.mediaDevices.getUserMedia({

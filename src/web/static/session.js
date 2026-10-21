@@ -183,10 +183,24 @@ const Session = (() => {
     micStream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
     });
-    micCtx = new AudioContext();
-    await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" })));
-    const node = new AudioWorkletNode(micCtx, "capture");
-    micCtx.createMediaStreamSource(micStream).connect(node);
+    // Let the browser resample the mic to 16 kHz: its resampler filters
+    // properly, while the worklet's fallback (averaging every ~3 samples)
+    // lets aliasing through, which costs speech-to-text accuracy.
+    let node;
+    for (const opts of [{ sampleRate: IN_RATE }, {}]) {
+      try {
+        micCtx = new AudioContext(opts);
+        await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" })));
+        node = new AudioWorkletNode(micCtx, "capture");
+        micCtx.createMediaStreamSource(micStream).connect(node);
+        break;
+      } catch (e) {
+        // Some browsers refuse a mic stream in a context at another rate.
+        if (micCtx) micCtx.close();
+        micCtx = null;
+        if (!opts.sampleRate) throw e;
+      }
+    }
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const q = new URLSearchParams({ barge_in: $("barge").checked ? "1" : "0", character: App.selected });

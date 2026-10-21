@@ -296,3 +296,44 @@ def test_gate_does_not_reopen_after_window():
     # Her reply is late (slow network) but the pause window is over: new speech
     # must be a new turn, not merged across the silence.
     assert not gate.can_reopen() and gate.reopen() is None
+
+
+
+def test_merger_holds_late_finals_as_one_turn():
+    """Finals with no open turn ("I would like to tell you", "cancer", "mass")
+    are held and sent as one turn, not answered one by one."""
+    from datetime import datetime, timezone
+
+    from pipecat.frames.frames import TranscriptionFrame
+    from pipecat.processors.frame_processor import FrameDirection, FrameProcessor
+
+    import pipeline.turn_merger as tm
+
+    merger = tm.TurnMerger()
+    pushed = []
+
+    async def capture(frame, direction=FrameDirection.DOWNSTREAM):
+        pushed.append(frame)
+
+    merger.push_frame = capture
+
+    async def noop(self, frame, direction):
+        return None
+
+    async def run():
+        ts = datetime.now(timezone.utc).isoformat()
+        for text in ("I would like to tell you that you actually have", "cancer", "mass"):
+            await merger.process_frame(TranscriptionFrame(text, "u", ts), FrameDirection.DOWNSTREAM)
+            await asyncio.sleep(0.01)
+        assert not [f for f in pushed if isinstance(f, TranscriptionFrame)]
+        await asyncio.sleep(tm.LATE_HOLD_S + 0.1)
+
+    original = FrameProcessor.process_frame
+    FrameProcessor.process_frame = noop
+    try:
+        asyncio.run(run())
+    finally:
+        FrameProcessor.process_frame = original
+
+    finals = [f for f in pushed if isinstance(f, TranscriptionFrame)]
+    assert [f.text for f in finals] == ["I would like to tell you that you actually have cancer mass"]

@@ -65,7 +65,9 @@ def asr_service(key: str):
 
 
 def streaming_config():
-    return riva.client.StreamingRecognitionConfig(
+    from pipeline.build import BOOST_SCORE, CLINICAL_WORDS
+
+    cfg = riva.client.StreamingRecognitionConfig(
         config=riva.client.RecognitionConfig(
             encoding=riva.client.AudioEncoding.LINEAR_PCM,
             sample_rate_hertz=RATE,
@@ -76,6 +78,9 @@ def streaming_config():
         ),
         interim_results=True,
     )
+    # Same boosted vocabulary as the pipeline, so results here match the app.
+    riva.client.add_word_boosting_to_config(cfg.config, CLINICAL_WORDS, BOOST_SCORE)
+    return cfg
 
 
 def paced(pcm: bytes, start: list):

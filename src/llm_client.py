@@ -74,3 +74,25 @@ def warm():
         return
     touch()
     _warm_task = asyncio.create_task(_warm())
+
+
+_cache_warned = False
+
+
+def log_cache(who: str, usage) -> None:
+    """Shows whether the cached system prompt was used. 'write' is the first
+    call (or the first after 5 minutes idle); every later call should 'read'.
+    Neither means the prefix is under the model's minimum and is not cached."""
+    global _cache_warned
+    if usage is None:
+        return
+    read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    fresh = getattr(usage, "input_tokens", 0) or 0
+    if read:
+        mark(who, "cache read", f"{read} tokens cached, {fresh} new")
+    elif write:
+        mark(who, "cache write", f"{write} tokens stored, {fresh} new")
+    elif not _cache_warned:
+        _cache_warned = True
+        mark(who, "NOT CACHED", f"{fresh} input tokens; system prompt below the model's cache minimum")

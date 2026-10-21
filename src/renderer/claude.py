@@ -1,8 +1,8 @@
 import os
 import re
 
-from llm_client import client, touch
-from renderer.prompt import RENDERER_TASK_PROMPT
+from llm_client import client, log_cache, touch
+from renderer.prompt import RENDERER_SYSTEM, renderer_system
 from tracing import mark
 
 RENDERER_MODEL = os.environ.get("RENDERER_MODEL", "claude-haiku-4-5-20251001")
@@ -55,7 +55,13 @@ async def aggregate_renderer_stream(text_stream, early_first_chunk: bool = EARLY
         yield buffer.strip()
 
 
-async def _raw_token_stream(message: str):
+def _system(persona) -> list:
+    if persona is not None:
+        return renderer_system(persona)
+    return [{"type": "text", "text": RENDERER_SYSTEM, "cache_control": {"type": "ephemeral"}}]
+
+
+async def _raw_token_stream(message: str, persona=None):
     first = True
     touch()
     try:
@@ -63,22 +69,27 @@ async def _raw_token_stream(message: str):
             model=RENDERER_MODEL,
             max_tokens=150,
             thinking={"type": "disabled"},
-            system=[{"type": "text", "text": RENDERER_TASK_PROMPT, "cache_control": {"type": "ephemeral"}}],
+            system=_system(persona),
             messages=[{"role": "user", "content": message}],
         ) as stream:
             async for text in stream.text_stream:
                 if first:
                     mark("renderer", "first token <-", repr(text), key="render_first_token")
+                    # Cache figures arrive with message_start, before the text.
+                    try:
+                        log_cache("renderer", stream.current_message_snapshot.usage)
+                    except Exception:
+                        pass
                     first = False
                 yield text
     finally:
         touch()
 
 
-async def stream_renderer(message: str):
-    async for chunk in aggregate_renderer_stream(_raw_token_stream(message)):
+async def stream_renderer(message: str, persona=None):
+    async for chunk in aggregate_renderer_stream(_raw_token_stream(message, persona)):
         yield chunk
 
 
-async def call_renderer(message: str) -> str:
-    return " ".join([chunk async for chunk in stream_renderer(message)])
+async def call_renderer(message: str, persona=None) -> str:
+    return " ".join([chunk async for chunk in stream_renderer(message, persona)])

@@ -12,6 +12,7 @@ from dotenv import load_dotenv  # type: ignore
 load_dotenv()
 
 import asyncio
+from functools import partial
 
 from interpreter.claude import call_interpreter
 from interpreter.parser import parse_turn_flags
@@ -58,7 +59,7 @@ async def main(persona_path: str, serial: bool):
         result: dict = {}
 
         async def interpret():
-            raw = await call_interpreter(interp_message)
+            raw = await call_interpreter(interp_message, persona)
             flags = parse_turn_flags(raw)
             timings["interp"] = time.monotonic() - t0
             new_state, escalated = apply_turn(state, flags, persona)
@@ -73,13 +74,13 @@ async def main(persona_path: str, serial: bool):
 
         if serial:
             real_message = await interpret()
-            async for chunk in stream_renderer(real_message):
+            async for chunk in stream_renderer(real_message, persona):
                 await emit(chunk)
             hit = None
         else:
             predicted, _ = apply_turn(state, TurnFlags(), persona)
             spec_message = build_renderer_message(persona, predicted, transcript, history=snapshot)
-            _, hit = await speculative_render(spec_message, interpret(), stream_renderer, emit)
+            _, hit = await speculative_render(spec_message, interpret(), partial(stream_renderer, persona=persona), emit)
             hits += hit
             misses += not hit
 

@@ -1,4 +1,5 @@
 import asyncio
+from functools import partial
 import os
 import re
 import time
@@ -294,7 +295,7 @@ class InterpreterProcessor(FrameProcessor):
     async def _interpret(self, turn_id, message, transcript, filler_line, measured_flags, direction):
         mark("interpreter", "API call ->", f"{INTERPRETER_MODEL}, {len(message)} chars")
         try:
-            raw_response = await call_interpreter(message)
+            raw_response = await call_interpreter(message, self.persona)
             mark("interpreter", "API call <-", repr(raw_response.strip()), key="interp_done")
             flags = parse_turn_flags(raw_response)
         except Exception as e:
@@ -533,7 +534,7 @@ class RendererProcessor(FrameProcessor):
         async def emit(chunk):
             await self._emit(chunk, direction)
 
-        line, hit = await speculative_render(spec_message, real_message(), stream_renderer, emit)
+        line, hit = await speculative_render(spec_message, real_message(), partial(stream_renderer, persona=self.persona), emit)
         if hit:
             self.hits += 1
         else:
@@ -549,7 +550,7 @@ class RendererProcessor(FrameProcessor):
         mark("renderer", "API call ->", f"{RENDERER_MODEL}, {len(message)} chars")
 
         parts = []
-        async for chunk in stream_renderer(message):
+        async for chunk in stream_renderer(message, self.persona):
             await self._emit(chunk, direction)
             parts.append(chunk)
         await self._finish(history, " ".join(parts))

@@ -15,6 +15,11 @@ from pipeline.timing import TurnTiming, words_from_riva_result
 
 # Riva's last transcript normally lands ~0.5 s after the learner stops.
 SLOW_STT_S = 2.0
+# Finals that arrive with no turn open (speech VAD missed the start of, or that
+# came after her reply was released) are held this long for more, then sent
+# as one turn. Without this, "I would like to tell you", "cancer", "mass"
+# became three turns, each scored and answered.
+LATE_HOLD_S = 1.0
 
 
 class TurnMerger(FrameProcessor):
@@ -32,6 +37,12 @@ class TurnMerger(FrameProcessor):
         self.wait_s = wait_s
         self.race_s = race_s
         self.wait_task: asyncio.Task | None = None
+        # For the "no words came back" warning: did the learner start speaking
+        # since the last flush, and did any words (interim or final) arrive?
+        self.started = False
+        self.heard_words = False
+        # True while holding late finals (see LATE_HOLD_S).
+        self.late_hold = False
         self.on_event = on_event or (lambda *a, **k: None)
 
     async def process_frame(self, frame: Frame, direction: FrameDirection):
@@ -42,22 +53,36 @@ class TurnMerger(FrameProcessor):
             if not (self.awaiting_final and self.pending_interim):
                 self._cancel_wait()
                 self.awaiting_final = False
+                self.late_hold = False
                 self.turn_open = True
+                if not self.fragments:
+                    self.heard_words = False
+                self.started = True
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, InterimTranscriptionFrame):
             if frame.text.strip():
                 self.pending_interim = True
+                self.heard_words = True
             await self.push_frame(frame, direction)
 
         elif isinstance(frame, TranscriptionFrame):
             text = frame.text.strip()
             self.pending_interim = False
+            if text:
+                self.heard_words = True
             if self.turn_open:
                 if text:
                     self.fragments.append(text)
                     self.words.extend(words_from_riva_result(frame.result))
                     self.on_event("held fragment", repr(text))
+            elif self.awaiting_final and self.late_hold:
+                if text:
+                    self.fragments.append(text)
+                    self.words.extend(words_from_riva_result(frame.result))
+                    self.on_event("late final held", repr(text))
+                self._cancel_wait()
+                self.wait_task = asyncio.create_task(self._flush_after_wait(direction, LATE_HOLD_S))
             elif self.awaiting_final:
                 if text:
                     self.fragments.append(text)
@@ -73,9 +98,14 @@ class TurnMerger(FrameProcessor):
                 self.words.extend(words_from_riva_result(frame.result))
                 self.on_event("late final merged", repr(text))
                 await self._flush(direction)
-            else:
-                self.on_event("late final passed through", repr(text))
-                await self.push_frame(frame, direction)
+            elif text:
+                self.fragments.append(text)
+                self.words.extend(words_from_riva_result(frame.result))
+                self.on_event("late final held", repr(text))
+                self._cancel_wait()
+                self.awaiting_final = True
+                self.late_hold = True
+                self.wait_task = asyncio.create_task(self._flush_after_wait(direction, LATE_HOLD_S))
 
         elif isinstance(frame, UserStoppedSpeakingFrame):
             self.turn_open = False
@@ -110,9 +140,15 @@ class TurnMerger(FrameProcessor):
         self.words = []
         self.awaiting_final = False
         self.pending_interim = False
+        self.late_hold = False
+        started, self.started = self.started, False
         if not merged:
-            # VAD heard sound but Riva sent no words. Once is a cough; every
-            # turn means speech-to-text is down (run src/tools/riva_check.py).
+            if self.heard_words or not started:
+                # The words already went out with the previous turn.
+                self.on_event("turn closed with no new text")
+                return
+            # VAD heard sound but Riva sent no words at all. Once is a cough;
+            # every turn means speech-to-text is down (src/tools/riva_check.py).
             self.on_event("turn closed with no text", "Riva returned nothing for this speech")
             await self.push_frame(
                 OutputTransportMessageUrgentFrame(message={"type": "stt_empty"}), FrameDirection.DOWNSTREAM

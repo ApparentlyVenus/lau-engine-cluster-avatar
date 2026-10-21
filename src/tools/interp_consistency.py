@@ -68,7 +68,7 @@ CONCURRENCY = 8
 
 async def classify(persona, history, text, semaphore):
     async with semaphore:
-        raw = await call_interpreter(build_interpreter_message(persona, text, history))
+        raw = await call_interpreter(build_interpreter_message(persona, text, history), persona)
     try:
         flags = parse_turn_flags(raw)
     except InterpreterParseError:

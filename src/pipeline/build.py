@@ -46,12 +46,37 @@ class Session:
     renderer: RendererProcessor
 
 
-def build_stt(word_times: bool) -> NvidiaSTTService:
+# Words this conversation is likely to contain, boosted in Riva's language
+# model so "biopsy" stops coming back as "babes" or "bipolar". Whether the
+# hosted streaming model honours boosting is up to NVIDIA; it is harmless if not.
+CLINICAL_WORDS = [
+    "biopsy", "results", "pathology", "pathologist", "oncologist", "oncology", "tumor", "tumour",
+    "malignant", "benign", "cancer", "cancerous", "carcinoma", "lymphoma", "metastasis", "metastatic",
+    "lymph", "node", "nodes", "mass", "lump", "scan", "MRI", "CT", "PET", "ultrasound", "mammogram",
+    "chemotherapy", "chemo", "radiotherapy", "radiation", "surgery", "surgeon", "treatment", "prognosis",
+    "diagnosis", "stage", "specialist", "referral", "appointment", "misheard", "sorry",
+]
+BOOST_SCORE = float(os.environ.get("STT_BOOST_SCORE", "4.0"))
+
+
+def boosted_words(persona: PersonaConfig | None) -> list[str]:
+    words = list(CLINICAL_WORDS)
+    if persona is not None:
+        # Her name, so "Mrs. Haddad" is heard as such.
+        words += [w for w in persona.scenario.patient_name.replace(".", " ").split() if len(w) > 2]
+    return words
+
+
+def build_stt(word_times: bool, persona: PersonaConfig | None = None) -> NvidiaSTTService:
     # Default streaming model (nemotron-asr-streaming). parakeet-tdt-0.6b-v2
     # is rejected by the hosted endpoint in streaming mode.
     return NvidiaSTTService(
         api_key=os.environ["NVIDIA_API_KEY"],
-        settings=NvidiaSTTService.Settings(word_time_offsets=word_times),
+        settings=NvidiaSTTService.Settings(
+            word_time_offsets=word_times,
+            boosted_lm_words=boosted_words(persona),
+            boosted_lm_score=BOOST_SCORE,
+        ),
     )
 
 
@@ -85,7 +110,7 @@ def build_session(
     stages: list[tuple[str, list[FrameProcessor]]] = [
         ("input", [input_proc] if input_proc else []),
         ("vad", [VADProcessor(vad_analyzer=SileroVADAnalyzer())]),
-        ("stt", [build_stt(opts.word_times)]),
+        ("stt", [build_stt(opts.word_times, persona)]),
         ("turns", [build_turn_processor(hold_s=opts.hold_s, smart=opts.smart_turn, barge_in=opts.barge_in)]),
         ("brain", [tracker, merger, interrupt_watcher, interpreter]),
         ("renderer", [renderer]),

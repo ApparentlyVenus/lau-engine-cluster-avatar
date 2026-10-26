@@ -5,6 +5,7 @@ Configuration comes from the environment:
     ANTHROPIC_API_KEY, NVIDIA_API_KEY, ELEVENLABS_API_KEY   required
     APP_USERNAME, APP_PASSWORD (, APP_SECRET)               the login (web/auth.py)
     CHARACTERS_READONLY=1                                   no saving characters (automatic on Vercel)
+    LOG_LEVEL=DEBUG                                         Pipecat's internal logs (default WARNING)
     DEFAULT_CHARACTER                                       selected when the page opens (default: tuning)
     NO_TTS=1                                                text only, no voice
 
@@ -24,6 +25,13 @@ try:  # .env is for local runs; hosted deployments set real environment variable
     load_dotenv()
 except ImportError:
     pass
+
+# Pipecat logs every frame at DEBUG by default, which buries the pipeline's own
+# [run ...] lines in the host's logs. Keep warnings and errors only.
+from loguru import logger  # noqa: E402
+
+logger.remove()
+logger.add(sys.stderr, level=os.environ.get("LOG_LEVEL", "WARNING"))
 
 from pipeline.build import SessionOptions  # noqa: E402
 from web.server import create_app  # noqa: E402

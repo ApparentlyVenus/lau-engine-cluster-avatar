@@ -18,9 +18,12 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 sys.path.insert(0, str(SRC))
 
-from dotenv import load_dotenv  # noqa: E402
+try:  # .env is for local runs; hosted deployments set real environment variables
+    from dotenv import load_dotenv
 
-load_dotenv()
+    load_dotenv()
+except ImportError:
+    pass
 
 from pipeline.build import SessionOptions  # noqa: E402
 from web.server import create_app  # noqa: E402

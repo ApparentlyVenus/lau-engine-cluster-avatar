@@ -1,14 +1,24 @@
-[build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
-
+# Used by Vercel (and any tool that reads pyproject). Local development still
+# works with `pip install -r requirements.txt`; keep the two lists in step.
 [project]
 name = "lau-engine-cluster-avatar"
 version = "0.1.0"
-requires-python = ">=3.10"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "anthropic",
+    "elevenlabs",
+    "nvidia-riva-client",
+    "python-dotenv",
+    "pydantic",
+    "httpx",
+    "pipecat-ai[anthropic,elevenlabs,nvidia,silero]>=1.10,<1.11",
+]
 
-[tool.setuptools.packages.find]
-where = ["src"]
-[tool.pytest.ini_options]
-testpaths = ["src/tests"]
-pythonpath = ["src"]
+[tool.vercel]
+entrypoint = "src.asgi:app"
+
+[tool.uv]
+# Not an installable package: only its dependencies are installed.
+package = false

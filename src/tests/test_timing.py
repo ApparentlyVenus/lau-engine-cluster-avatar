@@ -337,3 +337,37 @@ def test_merger_holds_late_finals_as_one_turn():
 
     finals = [f for f in pushed if isinstance(f, TranscriptionFrame)]
     assert [f.text for f in finals] == ["I would like to tell you that you actually have cancer mass"]
+
+
+def test_renderer_pauses_and_sets_voice_per_emotion(persona):
+    """In shock she waits before answering and the voice settings change once;
+    a second reply in the same emotion does not resend them."""
+    import time
+    from dataclasses import replace
+
+    from pipecat.frames.frames import TTSUpdateSettingsFrame
+
+    from pipeline.processors import RendererProcessor
+    from state_engine.config import SpeechProfile
+    from state_engine.engine import apply_turn, build_initial_state
+    from state_engine.turn_flags import TurnFlags
+
+    persona.speech = {}
+    sent = []
+    renderer = RendererProcessor(persona, voice_settings=lambda p: (("k", p.stability), {"stability": p.stability}))
+
+    async def capture(frame, direction=None):
+        sent.append(frame)
+
+    renderer.push_frame = capture
+    state, _ = apply_turn(build_initial_state(persona), TurnFlags(discloses_news=1.0), persona)
+    from state_engine.patient_state import EmotionMode
+    persona.speech[EmotionMode.SHOCK] = SpeechProfile(reply_delay_s=0.2, stability=0.3)
+    renderer.turn_state = state
+
+    t0 = time.monotonic()
+    asyncio.run(renderer._before_speaking())
+    waited = time.monotonic() - t0
+    asyncio.run(renderer._before_speaking())
+    assert waited >= 0.2 * state.emotion.intensity - 0.02
+    assert len([f for f in sent if isinstance(f, TTSUpdateSettingsFrame)]) == 1

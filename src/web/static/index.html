@@ -16,6 +16,7 @@
   </nav>
   <span class="spacer"></span>
   <label class="inline">Patient <select id="character"></select></label>
+  <a href="/logout" id="logout" class="inline-link" hidden>Log out</a>
 </header>
 
 <!-- ===== Session =========================================================== -->
@@ -38,7 +39,11 @@
         <div class="bar" id="trustbar"><i></i></div>
         <div class="row"><span>Saturation</span><b id="sat">–</b></div>
         <div class="bar" id="satbar"><i></i></div>
+        <div class="row"><span>Rates the doctor</span><b id="comp">–</b></div>
+        <div class="bar" id="compbar"><i></i></div>
         <div class="row"><span>Defense</span><b id="defense">–</b></div>
+        <div class="row"><span>News</span><b id="news">–</b></div>
+        <div class="row"><span>Satisfaction</span><b id="satis">–</b></div>
         <div class="row"><span>Unacknowledged turns</span><b id="unack">–</b></div>
       </div>
       <div class="card">
@@ -81,7 +86,7 @@
           <button class="ghost" id="export">Export JSON</button>
           <button class="danger" id="delete">Delete</button>
         </div>
-        <button class="ghost" id="talk">Talk to</button>
+        <button class="ghost" id="talk">Talk to her</button>
       </div>
       <div class="card">
         <h2>At a glance</h2>

@@ -13,6 +13,8 @@ FLAG_NAMES = [
 ]
 
 ANSWER_KEY = "answers_question"
+DISCLOSURE_KEY = "discloses_news"
+EVENT_KEYS = [ANSWER_KEY, DISCLOSURE_KEY]
 DISCOUNTED_FLAGS = ["logistics_first"]
 
 class InterpreterParseError(Exception):
@@ -47,14 +49,14 @@ def parse_turn_flags(raw_response: str) -> TurnFlags:
     if not isinstance(data, dict):
         raise InterpreterParseError(f"Interpreter response must be a JSON object\nRaw response: {raw_response}")
 
-    unknown = [key for key in data if key not in FLAG_NAMES and key != ANSWER_KEY]
+    unknown = [key for key in data if key not in FLAG_NAMES and key not in EVENT_KEYS]
     if unknown:
         raise InterpreterParseError(f"Interpreter response has unknown keys: {unknown}\nRaw response: {raw_response}")
 
     values = {name: _read_number(data, name) for name in FLAG_NAMES}
 
-    answer_factor = 1.0 - _read_number(data, ANSWER_KEY)
+    answers = _read_number(data, ANSWER_KEY)
     for name in DISCOUNTED_FLAGS:
-        values[name] *= answer_factor
+        values[name] *= 1.0 - answers
 
-    return TurnFlags(**values)
+    return TurnFlags(**values, answers_question=answers, discloses_news=_read_number(data, DISCLOSURE_KEY))

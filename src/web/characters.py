@@ -44,9 +44,17 @@ def warnings_for(data: dict) -> list[str]:
 
 
 class CharacterStore:
-    def __init__(self, folder: str | Path):
+    def __init__(self, folder: str | Path, read_only: bool = False):
         self.folder = Path(folder)
-        self.folder.mkdir(parents=True, exist_ok=True)
+        self.read_only = read_only
+        if not read_only:
+            self.folder.mkdir(parents=True, exist_ok=True)
+
+    def _writable(self):
+        if self.read_only:
+            raise CharacterError(
+                "Editing is turned off on this deployment (its files are read-only). "
+                "Edit characters locally and redeploy, or use Export JSON.", 403)
 
     # --- paths --------------------------------------------------------------
 
@@ -93,6 +101,7 @@ class CharacterStore:
     # --- write --------------------------------------------------------------
 
     def save(self, char_id: str, data: dict) -> dict:
+        self._writable()
         errors = validate_tuning(data)
         if errors:
             raise CharacterError("Not saved: the character has errors", 422, errors)
@@ -118,6 +127,7 @@ class CharacterStore:
 
     def delete(self, char_id: str) -> None:
         """Moves the file into deleted/ rather than removing it."""
+        self._writable()
         p = self.existing_path(char_id)
         if len(self.ids()) <= 1:
             raise CharacterError("Cannot delete the last character", 409)

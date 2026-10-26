@@ -1,6 +1,9 @@
 // Characters view: edit every field of a character's tuning file.
 const Characters = (() => {
-  const EMOTIONS = ["SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING"];
+  const EMOTIONS = ["CALM", "SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING"];
+  const cap = (e) => e[0] + e.slice(1).toLowerCase();
+  // Defaults of the optional sections (arc, speech), from the server.
+  let DEFAULTS = {};
   const DEFENSES = ["SARCASM", "INTELLECTUALIZING", "MINIMIZING"];
   const MODELS = [
     { value: "eleven_v3_conversational", label: "v3 conversational (performs tags)" },
@@ -46,7 +49,9 @@ const Characters = (() => {
         { type: "text", path: "scenario.patient_name", label: "Name" },
         { type: "int", path: "scenario.age", label: "Age", min: 0, max: 120 },
         { type: "textarea", path: "scenario.prompt", label: "Scenario",
-          help: "Her situation and what she knows. Keep medical facts she should not know out of it." },
+          help: "Who she is and what she knows walking in: family, work, personality, history, what she expects. Keep the result out of it: her voice reads this." },
+        { type: "textarea", path: "scenario.clinical_facts", label: "What the doctor has to tell her", optional: true,
+          help: "The result and plan. Only the scorer sees this (to recognise when the news is given); she never does." },
       ],
     },
     {
@@ -64,7 +69,7 @@ const Characters = (() => {
     },
     {
       title: "Starting point",
-      intro: "Where she is at the first turn. After that, her emotion and defense follow trust and saturation.",
+      intro: "Where she is when the doctor walks in. Before the news her emotion stays near this; the emotional arc below takes over once she is told.",
       fields: [
         { type: "num", path: "initial_state.trust", label: "Trust", min: 0, max: 1, step: 0.01, hint: bandOf("trust_bands"),
           presets: [{ label: "Shut down", value: 0.10 }, { label: "Distrustful", value: 0.32 }, { label: "Guarded", value: 0.57 }, { label: "Trusting", value: 0.85 }] },
@@ -78,6 +83,8 @@ const Characters = (() => {
           presets: [{ label: "Subtle", value: 0.1 }, { label: "Balanced", value: 0.3 }, { label: "Strong", value: 0.5 }] },
         { type: "num", path: "initial_state.emotion.intensity", label: "Intensity", min: 0, max: 1, step: 0.05,
           presets: [{ label: "Mild", value: 0.4 }, { label: "Moderate", value: 0.65 }, { label: "Intense", value: 0.9 }] },
+        { type: "num", path: "initial_state.competence", label: "How she rates the doctor", min: 0, max: 1, step: 0.05, optional: true,
+          help: "Starting opinion of the doctor's competence. Clear answers raise it; jargon, empty reassurance and contempt lower it. Low competence feeds her anxiety." },
         { type: "seg", path: "initial_state.defense.mode", label: "Starting defense", options: ["NONE", ...DEFENSES] },
         { type: "seg", path: "initial_state.defense.masking", label: "Emotion the defense hides", options: ["NONE", ...EMOTIONS] },
       ],
@@ -128,9 +135,49 @@ const Characters = (() => {
       ],
     },
     {
+      title: "Emotional arc",
+      collapsed: true,
+      intro: "How her emotions move once she is told. Each emotion's score comes from trust, saturation, how she rates the doctor and shock; the two strongest are her emotion and undertone. Blank uses the default shown.",
+      fields: [
+        { type: "num", path: "arc.disclosure.saturation", label: "Impact of the news on saturation", min: 0, max: 1, step: 0.05, optional: true },
+        { type: "num", path: "arc.disclosure.trust", label: "Impact of the news on trust", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.shock_peak", label: "Shock when told", min: 0, max: 1, step: 0.05, optional: true },
+        { type: "num", path: "arc.shock_decay", label: "Shock fades per turn by", min: 0, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.shock_relief.validating", label: "...faster with validation", min: 0, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.shock_relief.silence_tolerance", label: "...faster with silence", min: 0, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.shock_prolong.logistics_first", label: "...slower when rushed to logistics", min: 0, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.shock_prolong.jargon", label: "...slower with jargon", min: 0, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.pre_news_anxiety", label: "Anxiety before the news", min: 0, max: 1, step: 0.05, optional: true },
+        { type: "num", path: "arc.weights.CALM", label: "Weight: calm", min: 0, max: 3, step: 0.1, optional: true },
+        { type: "num", path: "arc.weights.SHOCK", label: "Weight: shock", min: 0, max: 3, step: 0.1, optional: true },
+        { type: "num", path: "arc.weights.ANGER", label: "Weight: anger", min: 0, max: 3, step: 0.1, optional: true },
+        { type: "num", path: "arc.weights.GRIEF", label: "Weight: grief", min: 0, max: 3, step: 0.1, optional: true },
+        { type: "num", path: "arc.weights.FEAR", label: "Weight: fear / anxiety", min: 0, max: 3, step: 0.1, optional: true },
+        { type: "num", path: "arc.weights.BARGAINING", label: "Weight: bargaining", min: 0, max: 3, step: 0.1, optional: true },
+        { type: "num", path: "arc.competence_deltas.answers_question", label: "Rates doctor: answering her question", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.validating", label: "Rates doctor: validating", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.jargon", label: "Rates doctor: jargon", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.premature_reassurance", label: "Rates doctor: empty reassurance", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.disrespect", label: "Rates doctor: disrespect", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.walkout_trust", label: "She walks out when trust stays at or below", min: 0, max: 0.5, step: 0.01, optional: true },
+        { type: "int", path: "arc.walkout_turns", label: "...for this many turns (0 = never)", min: 0, max: 10, optional: true },
+      ],
+    },
+    {
+      title: "How she speaks",
+      collapsed: true,
+      intro: "Per emotion: an extra pause before she answers (scaled by intensity), voice speed (Flash/Turbo only; v3 ignores it), voice stability, and a description of her speech the renderer follows. Blank uses the default shown.",
+      fields: EMOTIONS.flatMap((e) => [
+        { type: "num", path: `speech.${e}.reply_delay_s`, label: `${cap(e)}: pause before answering`, min: 0, max: 4, step: 0.1, unit: "s", optional: true },
+        { type: "num", path: `speech.${e}.speed`, label: `${cap(e)}: speed`, min: 0.7, max: 1.2, step: 0.01, optional: true },
+        { type: "num", path: `speech.${e}.stability`, label: `${cap(e)}: stability`, min: 0, max: 1, step: 0.05, optional: true },
+        { type: "textarea", path: `speech.${e}.style`, label: `${cap(e)}: how she speaks`, optional: true, rows: 2 },
+      ]),
+    },
+    {
       title: "Audio tags",
       intro: "Delivery tags the renderer may use for each emotion. v3 voices perform them; Flash strips them.",
-      fields: EMOTIONS.map((e) => ({ type: "tags", path: `audio_tags.${e}`, label: e[0] + e.slice(1).toLowerCase() })),
+      fields: EMOTIONS.map((e) => ({ type: "tags", path: `audio_tags.${e}`, label: cap(e) })),
     },
     {
       title: "Trust and saturation bands",
@@ -167,6 +214,7 @@ const Characters = (() => {
   const dirty = () => draft && JSON.stringify(draft) !== JSON.stringify(saved);
 
   const get = (o, p) => p.split(".").reduce((a, k) => (a == null ? undefined : a[k]), o);
+  const defaultFor = (p) => get(DEFAULTS, p);
   function set(o, p, v) {
     const ks = p.split(".");
     let a = o;
@@ -223,7 +271,10 @@ const Characters = (() => {
         return shell(f, (c) => {
           const t = document.createElement("textarea");
           t.value = get(draft, f.path) ?? "";
-          t.oninput = () => update(f.path, t.value);
+          if (f.rows) t.style.minHeight = `${f.rows * 1.6 + 1}em`;
+          const d = defaultFor(f.path);
+          if (d !== undefined) t.placeholder = String(d);
+          t.oninput = () => update(f.path, f.optional && t.value.trim() === "" ? undefined : t.value);
           c.appendChild(t);
         });
       case "int":
@@ -298,12 +349,13 @@ const Characters = (() => {
       const box = document.createElement("input");
       box.type = "number"; box.min = f.min; box.max = f.max; box.step = isInt ? 1 : f.step;
       box.value = cur ?? "";
-      if (f.optional) box.placeholder = f.def !== undefined ? String(f.def) : "default";
+      const def = f.def !== undefined ? f.def : defaultFor(f.path);
+      if (f.optional) box.placeholder = def !== undefined && def !== null ? String(def) : "default";
       let slider = null;
       if (!isInt) {
         slider = document.createElement("input");
         slider.type = "range"; slider.min = f.min; slider.max = f.max; slider.step = f.step;
-        slider.value = cur ?? f.def ?? (f.min + f.max) / 2;
+        slider.value = cur ?? def ?? (f.min + f.max) / 2;
         if (cur == null) slider.style.opacity = 0.4;
         c.appendChild(slider);
       }
@@ -538,7 +590,10 @@ const Characters = (() => {
     $("st-check").innerHTML =
       (errs.length ? `<ul class="errs">${errs.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : '<div class="okline">Valid</div>') +
       (warns.length ? `<ul class="warns">${warns.map((e) => `<li>${esc(e)}</li>`).join("")}</ul>` : "");
-    $("save").disabled = !dirty() || errs.length > 0;
+    const ro = App.config.read_only;
+    if (ro) $("st-check").insertAdjacentHTML("beforeend", '<div class="sub" style="margin-top:6px">Editing is off on this deployment. You can change fields to try them, export the JSON, or play a voice, but not save.</div>');
+    for (const b of ["delete", "new-char", "duplicate", "import-char"]) $(b).disabled = !!ro;
+    $("save").disabled = ro || !dirty() || errs.length > 0;
     $("revert").disabled = !dirty();
     const st = draft.initial_state || {}, p = draft.personality || {}, em = st.emotion || {};
     const rows = [
@@ -594,6 +649,7 @@ const Characters = (() => {
       saved = structuredClone(draft);
       const keep = id;
       await App.loadCharacters(keep);
+      paintStatus();
       App.toast("Saved");
     } catch (e) {
       check = { errors: e.errors.length ? e.errors : [e.message], warnings: check.warnings };
@@ -652,6 +708,11 @@ const Characters = (() => {
   // Do not lose edits when switching character or closing the tab.
   App.guards.push(() => !dirty() || confirm("Discard unsaved changes to this character?"));
   window.addEventListener("beforeunload", (e) => { if (dirty()) { e.preventDefault(); e.returnValue = ""; } });
+
+  App.listeners.config.push(async () => {
+    try { DEFAULTS = await App.api("GET", "/api/defaults"); } catch (e) { DEFAULTS = {}; }
+    if (draft) render();
+  });
 
   App.listeners.list.push(renderRoster);
   App.listeners.select.push((charId) => { renderRoster(App.characters); load(charId); });

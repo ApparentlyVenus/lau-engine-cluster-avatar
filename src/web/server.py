@@ -5,6 +5,7 @@
     /api/characters...      list, read, save, create, delete characters
     /api/validate           check a character without saving it
     /api/voice-test         speak a sample line in a voice (ElevenLabs HTTP)
+    /login, /logout         the single shared login (web/auth.py), when APP_USERNAME/APP_PASSWORD are set
 
 Works inside the devcontainer: audio travels over the WebSocket (TCP), which
 VSCode forwards like any other port. WebRTC would need UDP, which it does not.
@@ -19,8 +20,10 @@ import time
 from pathlib import Path
 
 import httpx
-from fastapi import Body, FastAPI, WebSocket
-from fastapi.responses import FileResponse, JSONResponse, Response
+from urllib.parse import parse_qs
+
+from fastapi import Body, FastAPI, Request, WebSocket
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pipecat.frames.frames import OutputTransportMessageUrgentFrame
 from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
@@ -30,8 +33,10 @@ import tracing
 from pipeline.build import SessionOptions, build_session
 from pipeline.processors import state_summary
 from state_engine.config import PersonaConfig
+from state_engine.config import tuning_defaults
 from state_engine.validate import validate_tuning
 from tracing import mark
+from web import auth
 from web.characters import CharacterError, CharacterStore, warnings_for
 from web.serializer import IN_SAMPLE_RATE, OUT_SAMPLE_RATE, PcmJsonSerializer
 
@@ -50,10 +55,53 @@ async def watch_event_loop(period_s: float = 0.1, warn_s: float = 0.25):
             mark("machine", "EVENT LOOP STALLED", f"{stall:.2f}s (CPU-bound work is blocking audio)")
 
 
-def create_app(characters_dir: str, default_character: str, opts: SessionOptions) -> FastAPI:
+def create_app(characters_dir: str, default_character: str, opts: SessionOptions, read_only: bool = False) -> FastAPI:
+    """read_only: characters can be viewed and tried but not saved (hosts with a
+    read-only filesystem, such as Vercel)."""
     app = FastAPI()
-    store = CharacterStore(characters_dir)
+    store = CharacterStore(characters_dir, read_only=read_only)
     active: dict[str, asyncio.Task] = {}
+
+    # --- login ---------------------------------------------------------------
+
+    @app.middleware("http")
+    async def require_login(request: Request, call_next):
+        path = request.url.path
+        if path in ("/login", "/logout") or auth.valid(request.cookies.get(auth.COOKIE)):
+            return await call_next(request)
+        if path.startswith("/api/") or path == "/config":
+            return JSONResponse({"error": "Not signed in"}, status_code=401)
+        return RedirectResponse("/login", status_code=303)
+
+    def login_page(error: str = "", status: int = 200):
+        html = (STATIC / "login.html").read_text().replace("<!--ERROR-->", error)
+        return HTMLResponse(html, status_code=status, headers={"Cache-Control": "no-store"})
+
+    @app.get("/login")
+    async def login_form():
+        if not auth.enabled():
+            return RedirectResponse("/", status_code=303)
+        return login_page()
+
+    @app.post("/login")
+    async def login(request: Request):
+        form = parse_qs((await request.body()).decode(errors="replace"))
+        username = (form.get("username") or [""])[0]
+        password = (form.get("password") or [""])[0]
+        if not await auth.check_credentials(username, password):
+            return login_page("Wrong username or password.", 401)
+        response = RedirectResponse("/", status_code=303)
+        response.set_cookie(
+            auth.COOKIE, auth.make_cookie(), max_age=auth.SESSION_S, httponly=True,
+            samesite="lax", secure=request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https",
+        )
+        return response
+
+    @app.get("/logout")
+    async def logout():
+        response = RedirectResponse("/login" if auth.enabled() else "/", status_code=303)
+        response.delete_cookie(auth.COOKIE)
+        return response
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
@@ -73,6 +121,8 @@ def create_app(characters_dir: str, default_character: str, opts: SessionOptions
             "tts": opts.tts,
             "in_rate": IN_SAMPLE_RATE,
             "out_rate": OUT_SAMPLE_RATE,
+            "read_only": read_only,
+            "login": auth.enabled(),
         }
 
     # --- characters ---------------------------------------------------------
@@ -98,6 +148,10 @@ def create_app(characters_dir: str, default_character: str, opts: SessionOptions
     async def delete_character(char_id: str):
         store.delete(char_id)
         return {"deleted": char_id}
+
+    @app.get("/api/defaults")
+    async def defaults():
+        return tuning_defaults()
 
     @app.post("/api/validate")
     async def validate(data: dict = Body(...)):
@@ -135,12 +189,17 @@ def create_app(characters_dir: str, default_character: str, opts: SessionOptions
 
     @app.websocket("/ws")
     async def ws(websocket: WebSocket):
+        if not auth.valid(websocket.cookies.get(auth.COOKIE)):
+            await websocket.close(code=1008)  # policy violation: not signed in
+            return
         await websocket.accept()
 
-        # One conversation at a time: a new tab replaces the old session.
-        for task in active.values():
-            task.cancel()
-        active.clear()
+        # A browser tab gets one conversation: starting again replaces its old
+        # session. Other tabs (other people at a demo) are left alone.
+        client = websocket.query_params.get("client") or "default"
+        old = active.pop(client, None)
+        if old is not None:
+            old.cancel()
 
         session_opts = SessionOptions(**{**opts.__dict__})
         barge = websocket.query_params.get("barge_in")
@@ -199,13 +258,15 @@ def create_app(characters_dir: str, default_character: str, opts: SessionOptions
         await runner.add_workers(session.worker)
         task = asyncio.create_task(runner.run())
         watchdog = asyncio.create_task(watch_event_loop())
-        active["session"] = task
+        active[client] = task
         try:
             await task
         except asyncio.CancelledError:
             await session.worker.cancel()
         finally:
             watchdog.cancel()
+            if active.get(client) is task:
+                del active[client]
 
     return app
 

@@ -11,7 +11,7 @@ REQUIRED_FLAGS = [
     "disrespect"
 ]
 
-VALID_EMOTIONS = {"NONE", "SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING"}
+VALID_EMOTIONS = {"NONE", "SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING", "CALM"}
 VALID_DEFENSE_MODES = {"NONE", "SARCASM", "INTELLECTUALIZING", "MINIMIZING"}
 
 
@@ -21,8 +21,17 @@ class TuningValidationError(Exception):
 
 TOP_LEVEL_KEYS = {
     "scenario", "severity_scale", "audio_tags", "personality", "interruption",
-    "initial_state", "flag_deltas", "timing", "voice",
+    "initial_state", "flag_deltas", "timing", "voice", "arc", "speech",
 }
+ARC_KEYS = {
+    "disclosure", "shock_peak", "shock_decay", "shock_relief", "shock_prolong", "pre_news_anxiety",
+    "weights", "competence_deltas", "walkout_trust", "walkout_turns",
+}
+COMPETENCE_KEYS = {
+    "validating", "silence_tolerance", "premature_reassurance", "jargon", "logistics_first",
+    "interruption", "disrespect", "answers_question",
+}
+SPEECH_KEYS = {"reply_delay_s", "speed", "stability", "style"}
 TIMING_KEYS = {
     "pause_threshold_s", "slow_wpm", "fast_wpm", "min_words_for_rate",
     "talk_over_min_bot_speaking_s", "talk_over_flag", "commit_after_s", "commit_after_unfinished_s",
@@ -49,6 +58,7 @@ def validate_tuning(tuning) -> list[str]:
     for check in (
         _validate_scenario, _validate_severity_scale, _validate_audio_tags, _validate_personality,
         _validate_interruption, _validate_initial_state, _validate_flag_deltas, _validate_timing, _validate_voice,
+        _validate_arc, _validate_speech,
     ):
         try:
             errors += check(tuning)
@@ -74,8 +84,9 @@ def _validate_scenario(tuning: dict) -> list[str]:
         errors.append("scenario.age must be an integer")
     if "patient_name" in scenario and (not isinstance(scenario["patient_name"], str) or not scenario["patient_name"].strip()):
         errors.append("scenario.patient_name must not be empty")
-    if "prompt" in scenario and not isinstance(scenario["prompt"], str):
-        errors.append("scenario.prompt must be text")
+    for key in ("prompt", "clinical_facts"):
+        if key in scenario and not isinstance(scenario[key], str):
+            errors.append(f"scenario.{key} must be text")
     return errors
 
 
@@ -221,6 +232,9 @@ def _validate_initial_state(tuning: dict) -> list[str]:
         if "masking" in defense and defense["masking"] not in VALID_EMOTIONS:
             errors.append(f"initial_state.defense.masking invalid: {defense['masking']}")
 
+    if "competence" in init and (not _num(init["competence"]) or not 0.0 <= init["competence"] <= 1.0):
+        errors.append("initial_state.competence must be between 0 and 1")
+
     if "unacknowledged_turns" in init or "turn_count" in init:
         errors.append("initial_state should not contain unacknowledged_turns or turn_count (always zero, removed from schema)")
 
@@ -297,6 +311,84 @@ def _validate_voice(tuning: dict) -> list[str]:
     stability = voice.get("stability")
     if stability is not None and (not _num(stability) or not 0.0 <= stability <= 1.0):
         errors.append("voice.stability must be between 0 and 1")
+    return errors
+
+
+def _unit(errors: list, path: str, value, lo: float = 0.0, hi: float = 1.0):
+    if not _num(value) or not lo <= value <= hi:
+        errors.append(f"{path} must be a number between {lo:g} and {hi:g}")
+
+
+def _validate_arc(tuning: dict) -> list[str]:
+    """Optional section; defaults live in state_engine.config.ArcConfig."""
+    arc = tuning.get("arc")
+    if arc is None:
+        return []
+    if not isinstance(arc, dict):
+        return ["arc must be an object"]
+    errors = []
+    unknown = set(arc) - ARC_KEYS
+    if unknown:
+        errors.append(f"arc has unknown keys: {sorted(unknown)}")
+    disclosure = arc.get("disclosure", {})
+    if not isinstance(disclosure, dict) or set(disclosure) - {"trust", "saturation"}:
+        errors.append("arc.disclosure must be an object with trust and/or saturation")
+    else:
+        for k, v in disclosure.items():
+            _unit(errors, f"arc.disclosure.{k}", v, -1, 1)
+    for key in ("shock_peak", "shock_decay", "pre_news_anxiety", "walkout_trust"):
+        if key in arc:
+            _unit(errors, f"arc.{key}", arc[key])
+    if "walkout_turns" in arc and (not isinstance(arc["walkout_turns"], int) or arc["walkout_turns"] < 0):
+        errors.append("arc.walkout_turns must be a whole number, 0 to disable")
+    if "weights" in arc:
+        w = arc["weights"]
+        if not isinstance(w, dict):
+            errors.append("arc.weights must be an object")
+        else:
+            for k, v in w.items():
+                if k not in VALID_EMOTIONS or k == "NONE":
+                    errors.append(f"arc.weights has invalid emotion: {k}")
+                _unit(errors, f"arc.weights.{k}", v, 0, 3)
+    for group, allowed in (("shock_relief", COMPETENCE_KEYS), ("shock_prolong", COMPETENCE_KEYS), ("competence_deltas", COMPETENCE_KEYS)):
+        if group in arc:
+            d = arc[group]
+            if not isinstance(d, dict):
+                errors.append(f"arc.{group} must be an object")
+                continue
+            for k, v in d.items():
+                if k not in allowed:
+                    errors.append(f"arc.{group} has unknown flag: {k}")
+                _unit(errors, f"arc.{group}.{k}", v, -1, 1)
+    return errors
+
+
+def _validate_speech(tuning: dict) -> list[str]:
+    """Optional section; defaults live in state_engine.config.DEFAULT_SPEECH."""
+    speech = tuning.get("speech")
+    if speech is None:
+        return []
+    if not isinstance(speech, dict):
+        return ["speech must be an object"]
+    errors = []
+    for emotion, prof in speech.items():
+        if emotion not in VALID_EMOTIONS or emotion == "NONE":
+            errors.append(f"speech has invalid emotion: {emotion}")
+            continue
+        if not isinstance(prof, dict):
+            errors.append(f"speech.{emotion} must be an object")
+            continue
+        unknown = set(prof) - SPEECH_KEYS
+        if unknown:
+            errors.append(f"speech.{emotion} has unknown keys: {sorted(unknown)}")
+        if "reply_delay_s" in prof:
+            _unit(errors, f"speech.{emotion}.reply_delay_s", prof["reply_delay_s"], 0, 4)
+        if "speed" in prof:
+            _unit(errors, f"speech.{emotion}.speed", prof["speed"], 0.7, 1.2)
+        if prof.get("stability") is not None:
+            _unit(errors, f"speech.{emotion}.stability", prof["stability"])
+        if "style" in prof and not isinstance(prof["style"], str):
+            errors.append(f"speech.{emotion}.style must be text")
     return errors
 
 

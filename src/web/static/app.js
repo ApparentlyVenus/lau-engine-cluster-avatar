@@ -19,6 +19,10 @@ const App = {
     });
     const ct = r.headers.get("content-type") || "";
     const data = ct.includes("json") ? await r.json() : await r.blob();
+    if (r.status === 401) {
+      location.href = "/login";
+      throw new Error("Not signed in");
+    }
     if (!r.ok) {
       const err = new Error((data && data.error) || `HTTP ${r.status}`);
       err.errors = (data && data.errors) || [];
@@ -94,6 +98,7 @@ $("character").addEventListener("change", (e) => App.select(e.target.value));
 window.addEventListener("DOMContentLoaded", async () => {
   route();
   App.config = await App.api("GET", "/config");
+  if (App.config.login) $("logout").hidden = false;
   App.listeners.config.forEach((fn) => fn(App.config));
   await App.loadCharacters();
 });

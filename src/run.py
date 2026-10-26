@@ -1,10 +1,11 @@
 """Run the whole patient pipeline. One entry point, four ways in:
 
-    python src/run.py web                      the web app: pick a character, talk to, create and edit characters
+    python src/run.py web                      the web app: pick a character, talk to her, create and edit characters
                                                (default; works in the devcontainer)
     python src/run.py mic                      local mic + speakers via PyAudio (run on your own machine, not in Docker)
     python src/run.py wav clips/a.wav ...      recorded clips in, her replies saved as .wav, full latency incl. TTS
     python src/run.py text                     typed lines, no audio at all
+    python src/run.py check                    live checks: prompt caching, Riva, ElevenLabs
 
 Common options:
     --persona PATH        tuning file (default: src/state_engine/tuning/tuning.json)
@@ -31,7 +32,7 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 sys.path.insert(0, str(SRC))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
 load_dotenv()
 
@@ -78,10 +79,7 @@ def quiet_logs():
 
 async def run_mic(args):
     try:
-        from pipecat.transports.local.audio import (
-            LocalAudioTransport,
-            LocalAudioTransportParams,
-        )
+        from pipecat.transports.local.audio import LocalAudioTransport, LocalAudioTransportParams
     except ImportError:
         sys.exit(
             "Local mic needs PyAudio (and PortAudio). Inside the devcontainer there is no\n"
@@ -105,9 +103,23 @@ async def run_mic(args):
     await runner.run()
 
 
+def run_checks(persona_path: str):
+    """The three live checks in one go. Each prints its own OK/FAIL lines."""
+    import subprocess
+
+    tools = SRC / "tools"
+    for title, script, extra in (
+        ("Prompt caching (system prompts must be >= 4,096 tokens)", "prompt_tokens.py", [persona_path]),
+        ("Speech-to-text (Riva)", "riva_check.py", []),
+        ("Her voice (ElevenLabs)", "tts_check.py", [persona_path]),
+    ):
+        print(f"\n=== {title} ===")
+        subprocess.run([sys.executable, str(tools / script), *extra], check=False)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Run the patient pipeline.", formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
-    parser.add_argument("mode", nargs="?", default="web", choices=["web", "mic", "wav", "text"])
+    parser.add_argument("mode", nargs="?", default="web", choices=["web", "mic", "wav", "text", "check"])
     parser.add_argument("clips", nargs="*", help="wav mode: 16 kHz mono 16-bit clips")
     parser.add_argument("--persona", default=DEFAULT_PERSONA)
     parser.add_argument("--characters", default=None, help="web mode: folder of character files")
@@ -122,6 +134,10 @@ def main(argv=None):
     parser.add_argument("--out", default="out", help="wav mode: where her replies are saved")
     parser.add_argument("--serial", action="store_true", help="text mode: no speculative renderer")
     args = parser.parse_args(argv)
+
+    if args.mode == "check":
+        run_checks(args.persona)
+        return
 
     if args.mode == "text":
         check_env(need_tts=False)

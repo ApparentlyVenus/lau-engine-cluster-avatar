@@ -104,7 +104,13 @@ def build_session(
         timing_cfg=timing_cfg,
         gate=gate,
     )
-    renderer = RendererProcessor(persona, gate=gate)
+    voice = None
+    voice_settings = None
+    if opts.tts:
+        from pipeline.tts import VoiceConfig, speech_settings
+        voice = VoiceConfig.from_tuning_file(persona_path)
+        voice_settings = speech_settings(voice, opts.tts_model)
+    renderer = RendererProcessor(persona, gate=gate, voice_settings=voice_settings)
     gate.on_reopen += [interpreter.rollback, renderer.cancel_turn]
 
     stages: list[tuple[str, list[FrameProcessor]]] = [
@@ -116,8 +122,8 @@ def build_session(
         ("renderer", [renderer]),
     ]
     if opts.tts:
-        from pipeline.tts import VoiceConfig, build_tts
-        stages.append(("tts", build_tts(VoiceConfig.from_tuning_file(persona_path), opts.tts_model)))
+        from pipeline.tts import build_tts
+        stages.append(("tts", build_tts(voice, opts.tts_model)))
     stages.append(("output", [output_proc] if output_proc else []))
 
     processors: list[FrameProcessor] = []

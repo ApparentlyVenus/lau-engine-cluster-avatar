@@ -84,7 +84,7 @@ def test_store_refuses_invalid_and_bad_ids(folder):
     with pytest.raises(CharacterError) as e:
         store.save("tuning", bad)
     assert e.value.status == 422 and e.value.errors
-    assert store.get("tuning")["initial_state"]["trust"] == 0.5  # untouched
+    assert store.get("tuning")["initial_state"]["trust"] == layla()["initial_state"]["trust"]  # untouched
     for evil in ("../x", "A B", ""):
         with pytest.raises(CharacterError):
             store.path(evil)
@@ -158,7 +158,7 @@ def test_editor_schema_covers_every_key():
             else:
                 yield p
 
-    covered_by_widget = ("severity_scale.", "flag_deltas.")  # bands and flag widgets build these paths
+    covered_by_widget = ("severity_scale.", "flag_deltas.", "speech.")  # widgets that build these paths
     missing = [
         p for p in leaves(layla())
         if not p.startswith(covered_by_widget) and f'"{p}"' not in js and f"`{p}`" not in js
@@ -167,3 +167,52 @@ def test_editor_schema_covers_every_key():
     assert missing == []
     for flag in layla()["flag_deltas"]:
         assert f'name: "{flag}"' in js
+
+
+def test_editor_covers_optional_sections():
+    """arc and speech are optional, so not in the shipped file: check each key has a field."""
+    js = (Path(__file__).parents[1] / "web" / "static" / "characters.js").read_text()
+    from state_engine.config import tuning_defaults
+
+    d = tuning_defaults()
+    for key, value in d["arc"].items():
+        if isinstance(value, dict) and key != "weights":
+            for sub in value:
+                assert f'"arc.{key}.{sub}"' in js, f"arc.{key}.{sub}"
+        elif key == "weights":
+            for sub in value:
+                assert f'"arc.weights.{sub}"' in js
+        else:
+            assert f'"arc.{key}"' in js, key
+    for field in ("reply_delay_s", "speed", "stability", "style"):
+        assert f"speech.${{e}}.{field}" in js
+    assert '"initial_state.competence"' in js and '"scenario.clinical_facts"' in js
+
+
+def test_api_defaults(client):
+    d = client.get("/api/defaults").json()
+    assert d["arc"]["disclosure"]["saturation"] > 0 and "SHOCK" in d["speech"]
+
+
+def test_arc_and_speech_validation():
+    data = layla()
+    data["arc"] = {"shock_peak": 2, "weights": {"JOY": 1}, "competence_deltas": {"jargon": -0.1, "bogus": 1}}
+    data["speech"] = {"ANGER": {"speed": 3, "tone": "x"}, "NONE": {}}
+    errors = validate_tuning(data)
+    for expect in ("arc.shock_peak", "arc.weights has invalid emotion: JOY", "unknown flag: bogus",
+                   "speech.ANGER.speed", "speech.ANGER has unknown keys", "speech has invalid emotion: NONE"):
+        assert any(expect in e for e in errors), (expect, errors)
+    data["arc"] = {"shock_decay": 0.2, "shock_relief": {"validating": 0.2}, "walkout_turns": 0}
+    data["speech"] = {"SHOCK": {"reply_delay_s": 2.0, "style": "very halting"}}
+    assert validate_tuning(data) == []
+
+
+def test_partial_arc_keeps_other_defaults():
+    from state_engine.config import ArcConfig, PersonaConfig
+
+    data = layla()
+    data["arc"] = {"shock_relief": {"validating": 0.3}, "weights": {"ANGER": 2.0}}
+    arc = PersonaConfig._from_dict(data).arc
+    assert arc.shock_relief["validating"] == 0.3
+    assert arc.shock_relief["silence_tolerance"] == ArcConfig().shock_relief["silence_tolerance"]
+    assert arc.weights["ANGER"] == 2.0 and arc.weights["GRIEF"] == ArcConfig().weights["GRIEF"]

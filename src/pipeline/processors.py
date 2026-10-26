@@ -15,6 +15,7 @@ from pipecat.frames.frames import (
     OutputTransportMessageUrgentFrame,
     TextFrame,
     TranscriptionFrame,
+    TTSUpdateSettingsFrame,
     UserStartedSpeakingFrame,
     VADUserStartedSpeakingFrame,
     VADUserStoppedSpeakingFrame,
@@ -83,6 +84,11 @@ def state_summary(persona, state) -> dict:
         "intensity": round(state.emotion.intensity, 2),
         "defense": state.defense.mode.name,
         "unacknowledged": state.unacknowledged_turns,
+        "competence": round(state.competence, 2),
+        "satisfaction": round(state.satisfaction, 2),
+        "news_delivered": state.news_delivered,
+        "shock": round(state.shock, 2),
+        "ended": state.ended,
     }
 
 
@@ -201,6 +207,10 @@ class InterpreterProcessor(FrameProcessor):
 
         if not frame.text.strip():
             mark("interpreter", "empty final skipped")
+            return
+
+        if self.state.ended:
+            mark("interpreter", "ignored", "she has ended the consultation")
             return
 
         gate_turn = getattr(frame.result, "gate_turn", None)
@@ -348,10 +358,15 @@ class RendererProcessor(FrameProcessor):
     as cut off, so the next line knows she was interrupted.
     """
 
-    def __init__(self, persona: PersonaConfig, speculative: bool = SPECULATIVE_RENDER, gate=None):
+    def __init__(self, persona: PersonaConfig, speculative: bool = SPECULATIVE_RENDER, gate=None, voice_settings=None):
         super().__init__()
         self.persona = persona
         self.gate = gate
+        # fn(SpeechProfile) -> (key, TTS settings delta); None without TTS.
+        self.voice_settings = voice_settings
+        self.voice_key = None
+        # The state her current reply is rendered from (set once it is known).
+        self.turn_state = None
         self.active_turn: int | None = None
         self.released = True
         self.out_of_character = False
@@ -465,6 +480,7 @@ class RendererProcessor(FrameProcessor):
             if self.gate is not None and self.active_turn is not None:
                 await self.gate.wait_release(self.active_turn)
             self.released = True
+            await self._before_speaking()
         if self.out_of_character:
             return  # rest of an out-of-character reply: never spoken
         if is_out_of_character(chunk):
@@ -482,12 +498,31 @@ class RendererProcessor(FrameProcessor):
         # Trailing space: the TTS aggregates by concatenating frames verbatim.
         await self.push_frame(TextFrame(text=chunk + " "), direction)
 
+    async def _before_speaking(self):
+        """Once per reply, before her first word: the pause her emotion calls
+        for (long in shock and grief, none in anger), and her voice settings."""
+        state = self.turn_state
+        if state is None:
+            return
+        profile = self.persona.speech_for(state.emotion.primary)
+        delay = profile.reply_delay_s * state.emotion.intensity
+        if delay >= 0.05:
+            mark("renderer", "reply delay", f"{delay:.2f}s ({state.emotion.primary.name.lower()})")
+            await asyncio.sleep(delay)
+        if self.voice_settings is not None:
+            key, delta = self.voice_settings(profile)
+            if delta is not None and key != self.voice_key:
+                self.voice_key = key
+                mark("tts", "voice settings", f"{key} for {state.emotion.primary.name.lower()}")
+                await self.push_frame(TTSUpdateSettingsFrame(delta=delta), FrameDirection.DOWNSTREAM)
+
     async def _close_response(self):
         if self.response_open:
             self.response_open = False
             await self.push_frame(LLMFullResponseEndFrame(), FrameDirection.DOWNSTREAM)
 
-    def _start_render(self, turn_id, history):
+    def _start_render(self, turn_id, history, state=None):
+        self.turn_state = state
         self.active = (history, [])
         self.active_turn = turn_id
         self.released = self.gate is None
@@ -517,6 +552,9 @@ class RendererProcessor(FrameProcessor):
         self.last_history = history
         await send_ui(self, {"type": "patient_done", "text": line.strip(), "note": extra})
         tracing.render_finished()
+        if self.turn_state is not None and self.turn_state.ended:
+            mark("renderer", "SHE LEFT", "trust stayed at the walk-out level; consultation over")
+            await send_ui(self, {"type": "patient_left"})
 
     async def _render_speculative(self, frame: TurnStartedFrame, future: asyncio.Future, direction):
         if frame.turn_id <= self.cancel_upto:
@@ -529,6 +567,7 @@ class RendererProcessor(FrameProcessor):
 
         async def real_message():
             update = await future
+            self.turn_state = update.state
             return self._message(update.state, update.learner_transcript, snapshot, update.filler_line)
 
         async def emit(chunk):
@@ -545,7 +584,7 @@ class RendererProcessor(FrameProcessor):
         if frame.turn_id is not None and frame.turn_id <= self.cancel_upto:
             return
         history = frame.history if frame.history is not None else []
-        self._start_render(frame.turn_id, history)
+        self._start_render(frame.turn_id, history, frame.state)
         message = self._message(frame.state, frame.learner_transcript, history, frame.filler_line)
         mark("renderer", "API call ->", f"{RENDERER_MODEL}, {len(message)} chars")
 

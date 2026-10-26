@@ -1,7 +1,7 @@
 // Session view: mic in, her voice out, live transcript and state.
 const Session = (() => {
   const IN_RATE = 16000, OUT_RATE = 24000;
-  let sttEmpty = 0;
+  let sttEmpty = 0, lastAudioAt = 0;
   let ws, micCtx, micStream, playCtx, nextTime = 0, sources = [], liveP = null, partialEl = null, lastLearner = null;
 
   // ---- who we are talking to ---------------------------------------------
@@ -85,6 +85,11 @@ const Session = (() => {
         if (liveP) liveP.insertAdjacentHTML("beforeend", '<div class="cut">cut off by the doctor</div>');
         liveP = null;
         break;
+      case "patient_left":
+        // She ended the consultation: let her last line finish, then stop.
+        addTurn('<div class="banner">She has ended the consultation. The session stops when she finishes speaking.</div>');
+        endAfterPlayback();
+        break;
       case "error":
         addTurn('<div class="cut">Could not start: ' + esc(ev.message) + "</div>");
         break;
@@ -103,6 +108,12 @@ const Session = (() => {
     $("satbar").firstElementChild.style.width = (s.saturation * 100) + "%";
     $("defense").textContent = s.defense;
     $("unack").textContent = s.unacknowledged;
+    if (s.competence !== undefined) {
+      $("comp").textContent = s.competence;
+      $("compbar").firstElementChild.style.width = (s.competence * 100) + "%";
+      $("news").textContent = s.news_delivered ? `told (shock ${s.shock})` : "not told yet";
+      $("satis").textContent = s.satisfaction;
+    }
     const flags = Object.entries(s.flags || {});
     if (s.flags) $("flags").innerHTML = flags.length
       ? flags.map(([k, v]) => `<span>${esc(k)} ${(+v).toFixed(2)}</span>`).join("") + (s.escalated ? "<span>escalated</span>" : "")
@@ -110,9 +121,9 @@ const Session = (() => {
   }
 
   function resetPanels() {
-    for (const id of ["emotion", "trust", "sat", "defense", "unack"]) $(id).textContent = "–";
+    for (const id of ["emotion", "trust", "sat", "defense", "unack", "comp", "news", "satis"]) $(id).textContent = "–";
     $("undertone").textContent = "";
-    $("trustbar").firstElementChild.style.width = $("satbar").firstElementChild.style.width = "0";
+    for (const id of ["trustbar", "satbar", "compbar"]) $(id).firstElementChild.style.width = "0";
     $("flags").innerHTML = '<span class="empty">none yet</span>';
     $("lat").innerHTML = '<span class="empty">none yet</span>';
   }
@@ -125,6 +136,7 @@ const Session = (() => {
 
   // ---- her voice ------------------------------------------------------------
   function play(buf) {
+    lastAudioAt = Date.now();
     const pcm = new Int16Array(buf);
     if (!pcm.length) return;
     const f = new Float32Array(pcm.length);
@@ -142,6 +154,16 @@ const Session = (() => {
       if (!sources.length) $("dot").className = ws ? "dot live" : "dot";
     };
   }
+  function endAfterPlayback() {
+    // Her audio can still be on its way from the voice service, so wait until
+    // nothing has arrived or played for a moment.
+    const since = Date.now();
+    const wait = setInterval(() => {
+      const quiet = !sources.length && Date.now() - lastAudioAt > 1500;
+      if (quiet && Date.now() - since > 2000) { clearInterval(wait); stop(); }
+    }, 250);
+  }
+
   function stopPlayback() {
     sources.forEach((s) => { try { s.stop(); } catch (e) {} });
     sources = []; nextTime = 0;
@@ -203,12 +225,21 @@ const Session = (() => {
     }
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
-    const q = new URLSearchParams({ barge_in: $("barge").checked ? "1" : "0", character: App.selected });
+    const q = new URLSearchParams({ barge_in: $("barge").checked ? "1" : "0", character: App.selected, client: clientId() });
     ws = new WebSocket(`${proto}://${location.host}/ws?${q}`);
     ws.binaryType = "arraybuffer";
     ws.onopen = () => { $("dot").className = "dot live"; };
     ws.onmessage = (m) => (typeof m.data === "string" ? onEvent(JSON.parse(m.data)) : play(m.data));
-    ws.onclose = () => { stop(); };
+    const opened = Date.now();
+    ws.onclose = (e) => {
+      if (e.code === 1008) { location.href = "/login"; return; }
+      // Closed by the server, not by End: hosted sessions have a time limit.
+      if (ws && !userStopped) {
+        const mins = ((Date.now() - opened) / 60000).toFixed(1);
+        addTurn(`<div class="cut">The connection closed after ${mins} min. Hosted sessions have a time limit; press Start for a new one.</div>`);
+      }
+      stop();
+    };
     node.port.onmessage = (e) => {
       if (e.data.level !== undefined) { $("level").style.width = Math.min(100, e.data.level * 250) + "%"; return; }
       if (ws && ws.readyState === 1) ws.send(e.data);
@@ -217,6 +248,16 @@ const Session = (() => {
     $("barge").disabled = $("character").disabled = true;
   }
 
+  // One id per browser tab, so a new session replaces only this tab's old one.
+  function clientId() {
+    try {
+      let id = sessionStorage.getItem("client");
+      if (!id) { id = Math.random().toString(36).slice(2); sessionStorage.setItem("client", id); }
+      return id;
+    } catch (e) { return "tab-" + Math.random().toString(36).slice(2); }
+  }
+
+  let userStopped = false;
   function stop() {
     if (ws) { const w = ws; ws = null; try { w.close(); } catch (e) {} }
     if (micStream) micStream.getTracks().forEach((t) => t.stop());
@@ -228,7 +269,11 @@ const Session = (() => {
     $("dot").className = "dot"; $("level").style.width = "0";
   }
 
-  $("go").onclick = () => (ws ? stop() : start().catch((e) => { alert("Could not start: " + e.message); stop(); }));
+  $("go").onclick = () => {
+    if (ws) { userStopped = true; stop(); return; }
+    userStopped = false;
+    start().catch((e) => { alert("Could not start: " + e.message); userStopped = true; stop(); });
+  };
   App.listeners.config.push((c) => { $("barge").checked = c.barge_in; });
 
   return { live: () => !!ws };

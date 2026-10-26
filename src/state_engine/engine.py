@@ -22,18 +22,23 @@ def build_initial_state(persona: PersonaConfig) -> PatientState:
         turn_count=0,
         emotion=emotion,
         defense=defense,
+        competence=init.get("competence", 0.6),
     )
 
 
 def apply_turn(state: PatientState, flags: TurnFlags, persona: PersonaConfig) -> tuple[PatientState, bool]:
+    """One learner turn. Returns (new state, whether she escalated)."""
+    if state.ended:
+        return state, False
     deltas = persona.flag_deltas
     personality = persona.personality
+    arc = persona.arc
 
     trust_delta = 0.0
     saturation_delta = 0.0
     turn_acknowledges = False
 
-    for flag_name, intensity in flags.__dict__.items():
+    for flag_name, intensity in flags.behaviours().items():
         if intensity <= 0:
             continue
         rule = deltas[flag_name]
@@ -42,9 +47,19 @@ def apply_turn(state: PatientState, flags: TurnFlags, persona: PersonaConfig) ->
         if rule.acknowledges and intensity >= personality.acknowledgment_intensity_threshold:
             turn_acknowledges = True
 
+    # The news itself, once.
+    discloses = flags.discloses_news >= 0.5 and not state.news_delivered
+    news_delivered = state.news_delivered or discloses
+    if discloses:
+        trust_delta += arc.disclosure_trust
+        saturation_delta += arc.disclosure_saturation
+
     new_trust = _clamp(state.trust + trust_delta)
     new_saturation = _clamp(state.saturation + saturation_delta)
     new_unacknowledged = 0 if turn_acknowledges else state.unacknowledged_turns + 1
+    if not news_delivered and not turn_acknowledges:
+        # Small talk before the news is not "ignoring her feelings".
+        new_unacknowledged = state.unacknowledged_turns
 
     escalated = False
     if new_unacknowledged >= personality.unacknowledged_threshold:
@@ -53,8 +68,25 @@ def apply_turn(state: PatientState, flags: TurnFlags, persona: PersonaConfig) ->
         new_unacknowledged = 0
         escalated = True
 
+    values = {**flags.behaviours(), "answers_question": flags.answers_question}
+    new_competence = _clamp(state.competence + sum(
+        arc.competence_deltas.get(name, 0.0) * v for name, v in values.items() if v > 0
+    ))
+
+    if discloses:
+        new_shock = arc.shock_peak
+    elif news_delivered:
+        relief = sum(arc.shock_relief.get(n, 0.0) * v for n, v in values.items() if v > 0)
+        prolong = sum(arc.shock_prolong.get(n, 0.0) * v for n, v in values.items() if v > 0)
+        new_shock = _clamp(state.shock - max(0.0, arc.shock_decay + relief - prolong))
+    else:
+        new_shock = 0.0
+
+    low = state.low_trust_turns + 1 if new_trust <= arc.walkout_trust else 0
+    ended = arc.walkout_turns > 0 and low >= arc.walkout_turns
+
     new_turn_count = state.turn_count + 1
-    new_emotion = _update_emotion(new_trust, new_saturation, new_turn_count)
+    new_emotion = _update_emotion(new_trust, new_saturation, new_competence, new_shock, news_delivered, arc)
     new_defense = _update_defense(new_trust, new_saturation, new_emotion, personality)
 
     new_state = PatientState(
@@ -64,25 +96,48 @@ def apply_turn(state: PatientState, flags: TurnFlags, persona: PersonaConfig) ->
         turn_count=new_turn_count,
         emotion=new_emotion,
         defense=new_defense,
+        competence=new_competence,
+        news_delivered=news_delivered,
+        shock=new_shock,
+        low_trust_turns=low,
+        ended=ended,
     )
     return new_state, escalated
 
 
-def _update_emotion(trust: float, saturation: float, turn_count: int) -> EmotionState:
-    shock = _clamp(0.65 - turn_count * 0.09)
-    anger = _clamp(saturation * (1 - trust) * 1.3)
-    grief = _clamp((1 - trust) * (1 - saturation) * 0.8 + (1 - trust) * 0.2)
-    fear = _clamp((1 - trust) * 0.5 * (1 - shock))
-    defensive = _clamp((1 - trust) * 0.4 + (0.25 if saturation > 0.65 else 0))
+def emotion_scores(trust: float, saturation: float, competence: float, shock: float,
+                   news_delivered: bool, arc) -> dict[EmotionMode, float]:
+    """Raw score per emotion; see the table in state_engine.config."""
+    t, s, c = trust, saturation, competence
+    w = arc.weights
+    if not news_delivered:
+        raw = {
+            EmotionMode.CALM: t * (1 - s),
+            EmotionMode.FEAR: arc.pre_news_anxiety,
+            # Squared: before the news, anger needs real friction (rudeness),
+            # not just a bit of tension.
+            EmotionMode.ANGER: s * (1 - t) ** 2,
+        }
+    else:
+        f = 1 - shock
+        raw = {
+            EmotionMode.SHOCK: shock,
+            EmotionMode.ANGER: s * (1 - t),
+            EmotionMode.GRIEF: f * s * t,
+            EmotionMode.FEAR: f * s * (1 - c),
+            EmotionMode.BARGAINING: f * s * max(0.0, 1 - 2 * abs(t - 0.55)),
+            EmotionMode.CALM: f * t * (1 - s),
+        }
+    scores = {e: _clamp(v * w.get(e.name, 1.0)) for e, v in raw.items()}
+    # Two entries at least, so there is always an undertone.
+    for e in (EmotionMode.CALM, EmotionMode.FEAR):
+        scores.setdefault(e, 0.0)
+    return scores
 
-    raw = {
-        EmotionMode.SHOCK: shock,
-        EmotionMode.ANGER: anger,
-        EmotionMode.GRIEF: grief,
-        EmotionMode.FEAR: fear,
-        EmotionMode.BARGAINING: defensive,
-    }
 
+def _update_emotion(trust: float, saturation: float, competence: float, shock: float,
+                    news_delivered: bool, arc) -> EmotionState:
+    raw = emotion_scores(trust, saturation, competence, shock, news_delivered, arc)
     ranked = sorted(raw.items(), key=lambda item: item[1], reverse=True)
     primary, primary_value = ranked[0]
     secondary, secondary_value = ranked[1]

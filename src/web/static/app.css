@@ -70,7 +70,7 @@ aside.side { display: flex; flex-direction: column; gap: 12px; }
 .row b { font-weight: 600; }
 .bar { height: 7px; background: var(--bar); border-radius: 4px; overflow: hidden; }
 .bar i { display: block; height: 100%; width: 0; transition: width .4s; }
-#trustbar i { background: var(--ok); } #satbar i { background: var(--warn); }
+#trustbar i { background: var(--ok); } #satbar i { background: var(--warn); } #compbar i { background: var(--learner); }
 .emotion { font-size: 20px; font-weight: 600; margin: 2px 0; }
 .chips span { display: inline-block; font-size: 12px; padding: 2px 8px; margin: 2px 4px 2px 0;
               border-radius: 10px; background: var(--bar); }
@@ -157,3 +157,6 @@ aside.side { display: flex; flex-direction: column; gap: 12px; }
 .summary td:last-child { text-align: right; }
 .toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg);
          padding: 8px 16px; border-radius: 7px; font-size: 14px; z-index: 20; }
+.banner { background: var(--bad); color: #fff; border-radius: 8px; padding: 10px 14px; margin: 6px 0 14px; font-size: 14px; }
+.inline-link { color: var(--muted); font-size: 13px; text-decoration: none; }
+.inline-link:hover { color: var(--ink); }

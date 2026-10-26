@@ -87,3 +87,34 @@ def test_per_turn_messages_leave_scenario_to_system(persona):
     state = build_initial_state(persona)
     assert persona.scenario.prompt not in build_interpreter_message(persona, "Hello.", [])
     assert persona.scenario.prompt not in build_renderer_message(persona, state, "Hello.")
+
+
+
+def test_parser_reads_disclosure_and_answers():
+    from interpreter.parser import parse_turn_flags
+
+    f = parse_turn_flags('{"discloses_news": 1.0, "logistics_first": 0.8, "answers_question": 1.0}')
+    assert f.discloses_news == 1.0 and f.answers_question == 1.0 and f.logistics_first == 0.0
+
+
+def test_renderer_message_news_style_and_ending(persona):
+    from dataclasses import replace
+
+    state = build_initial_state(persona)
+    before = build_renderer_message(persona, state, "Hello.")
+    assert "has not been told" in before and "How she speaks right now:" in before
+    told, _ = apply_turn(state, TurnFlags(discloses_news=1.0), persona)
+    after = build_renderer_message(persona, told, "It is cancer.")
+    assert "has been told" in after and "Halting" in after  # shock's speech style
+    assert "ending the consultation" in build_renderer_message(persona, replace(told, ended=True), "x")
+
+
+def test_clinical_facts_reach_the_scorer_not_her(persona):
+    from dataclasses import replace
+
+    from interpreter.prompt import interpreter_persona_block
+    from renderer.prompt import renderer_persona_block
+
+    persona.scenario = replace(persona.scenario, clinical_facts="Invasive ductal carcinoma, stage IIB.")
+    assert "stage IIB" in interpreter_persona_block(persona)
+    assert "stage IIB" not in renderer_persona_block(persona)

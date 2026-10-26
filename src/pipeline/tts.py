@@ -122,3 +122,28 @@ def build_tts(voice: VoiceConfig, model_override: str | None = None) -> list[Fra
             text_aggregation_mode=TextAggregationMode.TOKEN,
         ),
     ]
+
+
+def speech_settings(voice: VoiceConfig, model_override: str | None = None):
+    """Returns fn(SpeechProfile) -> (key, settings delta) for her current
+    emotion, or (key, None) when nothing applies. v3 (Text-to-Dialogue) only
+    accepts stability; Flash/Turbo also take speed. Changing either closes the
+    current ElevenLabs context, so the renderer sends it only as a new reply
+    starts, and only when it differs from the last one."""
+    model = model_override or voice.model
+
+    def for_profile(profile):
+        stability = profile.stability if profile.stability is not None else voice.stability
+        if is_v3(model):
+            if stability is None:
+                return None, None
+            from pipecat.services.elevenlabs.dialogue.tts import ElevenLabsDialogueTTSService
+            return ("v3", stability), ElevenLabsDialogueTTSService.Settings(stability=stability)
+        from pipecat.services.elevenlabs.tts import ElevenLabsTTSService
+        speed = max(0.7, min(1.2, profile.speed))
+        delta = ElevenLabsTTSService.Settings(speed=speed)
+        if stability is not None:
+            delta.stability = stability
+        return ("flash", speed, stability), delta
+
+    return for_profile

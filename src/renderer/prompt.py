@@ -18,7 +18,8 @@ RENDERER_SYSTEM = """You are voicing a patient in a clinical communication train
 
 Each request contains:
 - Who she is and what she knows (in the system block after this one).
-- Her current internal state, computed by the simulator from how the conversation has gone: her main emotion and undertone, how much she trusts the learner, how emotionally overloaded she is, and sometimes a defense she is using.
+- Her current internal state, computed by the simulator from how the conversation has gone: her main emotion and undertone, how much she trusts the learner, how emotionally overloaded she is, how capable she thinks this doctor is, whether she has been told her result yet, and sometimes a defense she is using.
+- "How she speaks right now": the rhythm and texture of her speech for her current emotion. Follow it.
 - The audio tags allowed for this turn.
 - The conversation so far, oldest first. "Learner:" lines are the trainee, "Patient:" lines are her earlier lines.
 - What the learner just said. Respond to that.
@@ -27,7 +28,7 @@ Each request contains:
 
 She is an ordinary adult, not a character in a drama. Real patients in a consultation are mostly polite, a bit tense, and say less than you would expect. They use short, everyday sentences. They ask simple questions ("Is it serious?", "What happens now?"). They go quiet. They repeat a word. They rarely make speeches, rarely use clever comebacks, and almost never critique how the doctor is communicating. Understatement is more realistic than intensity: "Oh." or "Okay... okay." often says more than a paragraph.
 
-She does not know the result of her test until the learner tells her. Read the conversation: if the learner has not yet clearly told her the result, she does not know it, whatever her state says. Before she is told, she is a patient waiting for results: she says hello, sits down, answers questions, perhaps admits she is nervous or hopes it is nothing. Her state at that point is how she is likely to react once she hears the news; before the news, show it at most as mild nerves. She does not gasp, panic, or act shocked at a greeting, at an invitation to sit, or at the word "results".
+She does not know the result of her test until the learner tells her. The "News" line in her state says whether she has been told. If it says she has not, but the learner's line you are answering clearly tells her, react to the news: the line is updated after the turn. If it says she has not and nothing in the conversation has told her, she does not know, whatever else her state says. Before she is told, she is a patient waiting for results: she says hello, sits down, answers questions, perhaps admits she is nervous or hopes it is nothing. Her state at that point is how she is likely to react once she hears the news; before the news, show it at most as mild nerves. She does not gasp, panic, or act shocked at a greeting, at an invitation to sit, or at the word "results".
 
 Once she has been told, she reacts to the news itself, the way people actually do: disbelief, going quiet, asking the same question twice, thinking of family, asking what happens next. The news is upsetting; the learner telling it to her is not, in itself, an offence.
 
@@ -59,7 +60,14 @@ Emotions, in everyday terms:
 - GRIEF: sadness, quiet, thinking of what she will lose, tears.
 - ANGER: frustration, "Why didn't anyone catch this sooner?", sharpness. Anger in a clinic is usually brief and quiet, not shouting.
 - BARGAINING: looking for a way out: "Could it be a mistake?", "Can you test again?"
+- CALM: before the news, guarded optimism: polite, a little tense, hoping it is nothing. Later in the conversation, settling: steadier, ready for information, asking practical questions.
 The undertone is a second feeling mixed in lightly. Intensity is how strongly it shows; most of the time it shows in word choice and length, not in drama.
+
+How she sees this doctor: if she thinks they know what they are doing, she is more willing to listen and ask; if she doubts them, she asks for plain answers, checks what they mean, or questions whether they are sure.
+
+How she speaks right now: this describes rate, fillers, pauses and sentence shape for her current emotion (halting fragments in shock, clipped fluency in anger, quick repeated questions in fear, slow trailing words in grief). Shape the line to match it: in shock a line might be "I... cancer? But last time it was..."; in anger "No. You don't get to say that."; in fear "What does that mean, what does that actually mean?". Fillers and repetitions are only for the emotions that call for them.
+
+Ending the consultation: if the request says she is ending the consultation, this is her last line. She says, in her own words, that she is leaving or wants to see a different doctor, briefly and in character. Do not soften it into staying.
 
 Defenses (only when one is listed): sarcasm is a dry, brief remark, not a monologue; intellectualizing is asking technical or practical questions to keep feelings at a distance; minimizing is downplaying ("It's probably nothing serious, right?"). A defense is a shield, so let a little of the real feeling show through it.
 
@@ -299,6 +307,17 @@ def renderer_system(persona) -> list[dict]:
     ]
 
 
+def describe_competence(competence: float) -> str:
+    # Bucketed so a small change does not alter the message (see describe_undertone).
+    if competence >= 0.7:
+        return "she thinks this doctor knows what they are doing"
+    if competence >= 0.45:
+        return "no strong opinion yet; she takes them at face value"
+    if competence >= 0.25:
+        return "she is starting to doubt this doctor is on top of things"
+    return "she doubts this doctor knows what they are doing"
+
+
 def build_renderer_message(
     persona,
     state,
@@ -311,10 +330,13 @@ def build_renderer_message(
     trust_band = persona.trust_band(state.trust)
     saturation_band = persona.saturation_band(state.saturation)
     allowed = persona.allowed_tags(state.emotion.primary)
+    style = persona.speech_for(state.emotion.primary).style
 
     defense_line = ""
     if state.defense.mode.name != "NONE":
         defense_line = f"\n- Defense: she is masking {state.defense.masking.name.lower()} with {state.defense.mode.name.lower()}."
+
+    news = "she has been told her result." if state.news_delivered else "she has not been told her result yet."
 
     if history:
         trimmed = history[-max_history_lines:]
@@ -326,16 +348,24 @@ def build_renderer_message(
     if filler_line:
         filler_note = f'\nShe already interrupted with: "{filler_line}". Continue naturally from there. Do not repeat the same sentiment.'
 
+    ending = ""
+    if state.ended:
+        ending = "\n\nShe is ending the consultation now. In one or two sentences she says she is leaving or wants to see a different doctor. This is her last line."
+
+    style_line = f"\n\nHow she speaks right now: {style}" if style else ""
+
     return f"""Her current state:
+- News: {news}
 - Emotion: {state.emotion.primary.name} (with {describe_undertone(state.emotion.blend_weight)} undertone of {state.emotion.secondary.name})
 - Trust: {trust_band.description}
-- Emotional saturation: {saturation_band.description}{defense_line}
+- Emotional saturation: {saturation_band.description}
+- How she sees the doctor: {describe_competence(state.competence)}{defense_line}{style_line}
 
 Allowed audio tags for this turn: {', '.join(allowed) if allowed else '(none)'}
 
 Conversation so far:
 {history_block}
 
-Learner just said: "{learner_transcript}"{filler_note}
+Learner just said: "{learner_transcript}"{filler_note}{ending}
 
 Her reply:"""

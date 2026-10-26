@@ -87,6 +87,10 @@ Disrespect needs clear evidence of contempt in the words themselves. If you have
 
 Set answers_question to 1.0 only when the patient's most recent line asked a direct question or asked for information, and the learner's turn directly answers it. Leave it out otherwise. Score every other category normally; this key only softens logistics_first, because answering what she asked is responsive, not avoidant.
 
+# discloses_news (not a behaviour score)
+
+Set discloses_news to 1.0 when this turn tells her the result, clearly enough that she now knows she has the diagnosis (for this patient, what the result is is described in the block after this one). "The biopsy showed cancer", "I'm afraid it's malignant", "you have breast cancer" all count; so does a jargon-heavy disclosure ("it's an invasive ductal carcinoma"), because she has still been told. A warning shot ("I'm afraid it's not good news"), an unfinished sentence ("you actually have"), or a later turn that only repeats or explains the result after she already knows does not count. Leave it out otherwise. It does not change any other score: a well-delivered disclosure with nothing else in it is {"discloses_news": 1.0}.
+
 # Measured timing
 
 The learner's turn may contain markers like [pause 1.4s], and there may be a "Measured timing" list. These come from the audio and are accurate, but they only tell you about silence_tolerance and help you read the words in context:
@@ -130,6 +134,14 @@ Learner: "Before I go through them, can you tell me what you understand about wh
 Patient: "They said it was probably nothing."
 Learner: "I'm afraid I have some news that isn't what we hoped for."
 {}
+
+Patient: "[hesitant] Oh. Okay... what is it?"
+Learner: "The biopsy showed that the lump in your breast is a cancer. I'm so sorry."
+{"discloses_news": 1.0, "validating": 0.4, "answers_question": 1.0}
+
+Patient: "[shocked] Cancer?"
+Learner: "Yes. It's a type of breast cancer. I know that's a lot to hear."
+{"validating": 0.6}
 
 Patient: "[shocked] What? But they said it was nothing."
 Learner: "I know. I'm so sorry. [pause 3.1s]"
@@ -190,11 +202,11 @@ Learner: "cancer"
 
 Patient: "Okay. What did it show?"
 Learner: "I'm afraid the biopsy showed that the lump is a cancer."
-{"answers_question": 1.0}
+{"answers_question": 1.0, "discloses_news": 1.0}
 
 Patient: "Is it bad news?"
 Learner: "The histology confirms an invasive ductal carcinoma with nodal involvement."
-{"jargon": 0.9, "answers_question": 1.0}
+{"jargon": 0.9, "answers_question": 1.0, "discloses_news": 1.0}
 
 Patient: "[trembling voice] Cancer? Are you sure?"
 Learner: "Yes, I'm sure. I'm so sorry. [pause 2.6s] This is a lot to take in."
@@ -264,15 +276,16 @@ Learner: "Hello hello"
 
 # Output format
 
-Return ONLY a raw JSON object with the keys that scored above 0, using the exact key names above (validating, silence_tolerance, premature_reassurance, jargon, logistics_first, disrespect, answers_question). Never use markdown or code fences, never add commentary, and never include keys that scored 0. If nothing applies, return {}."""
+Return ONLY a raw JSON object with the keys that scored above 0, using the exact key names above (validating, silence_tolerance, premature_reassurance, jargon, logistics_first, disrespect, answers_question, discloses_news). Never use markdown or code fences, never add commentary, and never include keys that scored 0. If nothing applies, return {}."""
 
 
 def interpreter_persona_block(persona) -> str:
     s = persona.scenario
+    facts = f"\n\nWhat the learner has to tell her (she does not know this until they do):\n{s.clinical_facts}" if s.clinical_facts.strip() else ""
     return f"""# This patient
 
 Patient: {s.patient_name}, age {s.age}.
-{s.prompt}
+{s.prompt}{facts}
 
 Score every turn of this conversation against the rubric above. Facts about her situation come only from this description; the learner may mention her results or her name, and misheard versions of them should be read as the real words."""
 

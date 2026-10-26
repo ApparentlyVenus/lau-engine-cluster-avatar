@@ -28,13 +28,13 @@ except ImportError:
 
 # Pipecat logs every frame at DEBUG by default, which buries the pipeline's own
 # [run ...] lines in the host's logs. Keep warnings and errors only.
-from loguru import logger  # noqa: E402
+from loguru import logger
 
 logger.remove()
 logger.add(sys.stderr, level=os.environ.get("LOG_LEVEL", "WARNING"))
 
-from pipeline.build import SessionOptions  # noqa: E402
-from web.server import create_app  # noqa: E402
+from pipeline.build import SessionOptions
+from web.server import create_app
 
 opts = SessionOptions()
 opts.tts = os.environ.get("NO_TTS", "") not in ("1", "true")

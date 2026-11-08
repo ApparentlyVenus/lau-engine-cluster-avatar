@@ -1,4 +1,4 @@
-// Session view: mic in, her voice out, live transcript and state.
+// Session view: mic in, the patient's voice out, live transcript and state.
 const Session = (() => {
   const IN_RATE = 16000, OUT_RATE = 24000;
   let sttEmpty = 0, lastAudioAt = 0;
@@ -31,6 +31,8 @@ const Session = (() => {
   }
 
   function onEvent(ev) {
+    TurnLog.onEvent(ev);
+    if (window.Avatar) Avatar.event(ev);
     switch (ev.type) {
       case "learner_partial":
         if (!partialEl) partialEl = addTurn('<div class="who-l">Doctor</div><div class="partial"></div>');
@@ -86,8 +88,8 @@ const Session = (() => {
         liveP = null;
         break;
       case "patient_left":
-        // She ended the consultation: let her last line finish, then stop.
-        addTurn('<div class="banner">She has ended the consultation. The session stops when she finishes speaking.</div>');
+        // The patient ended the consultation: let the last line finish, then stop.
+        addTurn('<div class="banner">The patient has ended the consultation. The session stops when they finish speaking.</div>');
         endAfterPlayback();
         break;
       case "error":
@@ -114,6 +116,10 @@ const Session = (() => {
       $("news").textContent = s.news_delivered ? `told (shock ${s.shock})` : "not told yet";
       $("satis").textContent = s.satisfaction;
     }
+    if (s.unanswered !== undefined) {
+      $("unans").textContent = s.unanswered;
+      $("blame").textContent = s.blame;
+    }
     const flags = Object.entries(s.flags || {});
     if (s.flags) $("flags").innerHTML = flags.length
       ? flags.map(([k, v]) => `<span>${esc(k)} ${(+v).toFixed(2)}</span>`).join("") + (s.escalated ? "<span>escalated</span>" : "")
@@ -121,7 +127,7 @@ const Session = (() => {
   }
 
   function resetPanels() {
-    for (const id of ["emotion", "trust", "sat", "defense", "unack", "comp", "news", "satis"]) $(id).textContent = "–";
+    for (const id of ["emotion", "trust", "sat", "defense", "unack", "unans", "blame", "comp", "news", "satis"]) $(id).textContent = "–";
     $("undertone").textContent = "";
     for (const id of ["trustbar", "satbar", "compbar"]) $(id).firstElementChild.style.width = "0";
     $("flags").innerHTML = '<span class="empty">none yet</span>';
@@ -134,7 +140,7 @@ const Session = (() => {
     $("lat").innerHTML = rows.length ? "<pre style='margin:0'>" + rows.join("\n") + "</pre>" : '<span class="empty">–</span>';
   }
 
-  // ---- her voice ------------------------------------------------------------
+  // ---- the patient's voice ------------------------------------------------------------
   function play(buf) {
     lastAudioAt = Date.now();
     const pcm = new Int16Array(buf);
@@ -155,7 +161,7 @@ const Session = (() => {
     };
   }
   function endAfterPlayback() {
-    // Her audio can still be on its way from the voice service, so wait until
+    // The patient's audio can still be on its way from the voice service, so wait until
     // nothing has arrived or played for a moment.
     const since = Date.now();
     const wait = setInterval(() => {
@@ -226,10 +232,16 @@ const Session = (() => {
 
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const q = new URLSearchParams({ barge_in: $("barge").checked ? "1" : "0", character: App.selected, client: clientId() });
+    TurnLog.newSession(App.current()?.name || App.selected);
+    if (window.Avatar) await Avatar.start();
     ws = new WebSocket(`${proto}://${location.host}/ws?${q}`);
     ws.binaryType = "arraybuffer";
     ws.onopen = () => { $("dot").className = "dot live"; };
-    ws.onmessage = (m) => (typeof m.data === "string" ? onEvent(JSON.parse(m.data)) : play(m.data));
+    ws.onmessage = (m) => {
+      if (typeof m.data === "string") return onEvent(JSON.parse(m.data));
+      play(m.data);
+      if (window.Avatar) Avatar.audio(m.data);
+    };
     const opened = Date.now();
     ws.onclose = (e) => {
       if (e.code === 1008) { location.href = "/login"; return; }
@@ -263,6 +275,7 @@ const Session = (() => {
     if (micStream) micStream.getTracks().forEach((t) => t.stop());
     if (micCtx) micCtx.close();
     stopPlayback();
+    if (window.Avatar) Avatar.stop();
     micStream = micCtx = null;
     $("go").textContent = "Start"; $("go").className = "";
     $("barge").disabled = $("character").disabled = false;

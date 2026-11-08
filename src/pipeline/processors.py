@@ -41,7 +41,7 @@ from renderer.claude import RENDERER_MODEL, stream_renderer
 from renderer.prompt import build_renderer_message
 from renderer.speculation import speculative_render
 from state_engine.config import PersonaConfig
-from state_engine.engine import apply_turn, build_initial_state
+from state_engine.engine import apply_turn, build_initial_state, she_asked
 from state_engine.turn_flags import TurnFlags
 from tracing import mark
 
@@ -89,6 +89,8 @@ def state_summary(persona, state) -> dict:
         "news_delivered": state.news_delivered,
         "shock": round(state.shock, 2),
         "ended": state.ended,
+        "unanswered": state.unanswered,
+        "blame": round(state.blame, 2),
     }
 
 
@@ -134,7 +136,7 @@ class TimingTracker(FrameProcessor):
                 resumed = self.bot_stopped_at is not None and now - self.bot_stopped_at < RESUME_WITHIN_S
                 if not resumed or self.bot_started_at is None:
                     self.bot_started_at = now
-                    mark("timing", "her audio started")
+                    mark("timing", "patient audio started")
                 tracing.audio_started()
         elif isinstance(frame, BotStoppedSpeakingFrame):
             if self.bot_speaking:
@@ -153,11 +155,11 @@ class TimingTracker(FrameProcessor):
             if self.bot_speaking and self.bot_started_at is not None:
                 audible = now - self.bot_started_at
                 live.talked_over_her = audible >= self.cfg.talk_over_min_bot_speaking_s
-                mark("timing", "learner over her" if live.talked_over_her else "learner started",
-                     f"she had been speaking {audible:.1f}s")
+                mark("timing", "learner over patient" if live.talked_over_her else "learner started",
+                     f"patient had been speaking {audible:.1f}s")
             elif self.bot_stopped_at is not None:
                 live.gap_after_her_line_s = now - self.bot_stopped_at
-                mark("timing", "gap after her line", f"{live.gap_after_her_line_s:.1f}s")
+                mark("timing", "gap after patient line", f"{live.gap_after_her_line_s:.1f}s")
             self.current = live
 
         await self.push_frame(frame, direction)
@@ -210,7 +212,7 @@ class InterpreterProcessor(FrameProcessor):
             return
 
         if self.state.ended:
-            mark("interpreter", "ignored", "she has ended the consultation")
+            mark("interpreter", "ignored", "the patient has ended the consultation")
             return
 
         gate_turn = getattr(frame.result, "gate_turn", None)
@@ -235,6 +237,7 @@ class InterpreterProcessor(FrameProcessor):
         if self.gate is not None:
             # Everything needed to undo this turn if the learner was only pausing.
             self.gate.attach(turn_id, (self.state, len(self.history), timing.live))
+        asked = she_asked(self.history)
         self.history.append(f"Learner: {frame.text}")
         filler_line = self.filler_getter() if self.filler_getter else None
 
@@ -251,7 +254,7 @@ class InterpreterProcessor(FrameProcessor):
             "timing": measured,
         })
 
-        predicted_state, _ = apply_turn(self.state, measured_flags, self.persona)
+        predicted_state, _ = apply_turn(self.state, measured_flags, self.persona, she_asked=asked)
         await self.push_frame(
             TurnStartedFrame(
                 turn_id=turn_id,
@@ -267,7 +270,7 @@ class InterpreterProcessor(FrameProcessor):
 
         async def run():
             await _after(previous)
-            await self._interpret(turn_id, message, frame.text, filler_line, measured_flags, direction)
+            await self._interpret(turn_id, message, frame.text, filler_line, measured_flags, direction, asked)
 
         task = asyncio.create_task(run())
         self.tasks[turn_id] = task
@@ -302,7 +305,7 @@ class InterpreterProcessor(FrameProcessor):
             mark("timing", "no word timings", "STT gave none; pauses inside turns are unavailable")
         return timing
 
-    async def _interpret(self, turn_id, message, transcript, filler_line, measured_flags, direction):
+    async def _interpret(self, turn_id, message, transcript, filler_line, measured_flags, direction, asked=False):
         mark("interpreter", "API call ->", f"{INTERPRETER_MODEL}, {len(message)} chars")
         try:
             raw_response = await call_interpreter(message, self.persona)
@@ -316,7 +319,9 @@ class InterpreterProcessor(FrameProcessor):
 
         flags.interruption = max(flags.interruption, measured_flags.interruption)
 
-        self.state, escalated = apply_turn(self.state, flags, self.persona)
+        before = state_summary(self.persona, self.state)
+        trace: dict = {}
+        self.state, escalated = apply_turn(self.state, flags, self.persona, she_asked=asked, trace=trace)
         mark(
             "state_engine",
             "apply_turn done",
@@ -328,6 +333,11 @@ class InterpreterProcessor(FrameProcessor):
             "flags": {k: v for k, v in flags.__dict__.items() if v},
             "escalated": escalated,
             **state_summary(self.persona, self.state),
+            # For the turn log: where the turn started and how each rule moved it.
+            "turn_id": turn_id,
+            "transcript": transcript,
+            "before": before,
+            "trace": trace,
         })
 
         await self.push_frame(
@@ -429,7 +439,7 @@ class RendererProcessor(FrameProcessor):
             last = self.last_history[-1]
             if last.startswith("Patient: ") and not last.endswith("(cut off by the learner)"):
                 self.last_history[-1] = last + " (cut off by the learner)"
-                mark("renderer", "CUT OFF", "while her audio was playing")
+                mark("renderer", "CUT OFF", "while patient audio was playing")
                 await send_ui(self, {"type": "cut_off"})
         if self.latest_turn <= self.cancel_upto and self.active is None:
             return  # nothing in flight

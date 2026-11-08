@@ -142,9 +142,9 @@ def timing_block(timing: TurnTiming, cfg: TimingConfig) -> str | None:
     lines = []
     live = timing.live
     if live.talked_over_her:
-        lines.append("Started speaking while she was still talking.")
+        lines.append("Started speaking while the patient was still talking.")
     elif live.gap_after_her_line_s is not None:
-        lines.append(f"Started speaking {live.gap_after_her_line_s:.1f}s after she finished.")
+        lines.append(f"Started speaking {live.gap_after_her_line_s:.1f}s after the patient finished.")
 
     if timing.words:
         pauses = timing.pauses(cfg)

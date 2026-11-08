@@ -1,10 +1,17 @@
 // Characters view: edit every field of a character's tuning file.
 const Characters = (() => {
-  const EMOTIONS = ["CALM", "SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING"];
+  const EMOTIONS = ["CALM", "SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING", "DEFENSIVE"];
   const cap = (e) => e[0] + e.slice(1).toLowerCase();
   // Defaults of the optional sections (arc, speech), from the server.
   let DEFAULTS = {};
-  const DEFENSES = ["SARCASM", "INTELLECTUALIZING", "MINIMIZING"];
+  const DEFENSES = ["SARCASM", "INTELLECTUALIZING", "MINIMIZING", "PASSIVE_AGGRESSIVE"];
+  // Every behaviour the scorer flags, with a short name for compact grids.
+  const FLAG_LABELS = {
+    validating: "validating", silence_tolerance: "silence", premature_reassurance: "early reassurance",
+    jargon: "jargon", logistics_first: "logistics first", interruption: "talking over", disrespect: "disrespect",
+    names_subtext: "names the worry", removes_blame: "not your fault", checks_understanding: "checks understanding",
+    repairs: "repairs", blaming: "blaming", learner_defensive: "doctor defensive", misreads_her: "misreads them",
+  };
   const MODELS = [
     { value: "eleven_v3_conversational", label: "v3 conversational (performs tags)" },
     { value: "eleven_v3", label: "v3 (performs tags)" },
@@ -35,23 +42,25 @@ const Characters = (() => {
   ];
 
   const bandOf = (group) => (v, d) => {
-    const bands = Object.entries((d.severity_scale || {})[group] || {}).sort((a, b) => b[1].min - a[1].min);
+    const bands = Object.entries((d.severity_scale || DEFAULTS.severity_scale || {})[group] || {}).sort((a, b) => b[1].min - a[1].min);
     const hit = bands.find(([, b]) => v >= b.min);
     return hit ? hit[0].replace(/_/g, " ") : "";
   };
 
   // ---- the schema: every key of the tuning file appears here -------------
   const SECTIONS = [
+    // ---- the basics: enough to make a working character -------------------
+    { group: "Basics", note: "Enough to make a working character. Everything under Fine tuning has sensible defaults." },
     {
       title: "Patient",
-      intro: "Who she is and what she knows walking in. Both Claude calls read this.",
+      intro: "Who the patient is and what they know walking in. Both Claude calls read this.",
       fields: [
         { type: "text", path: "scenario.patient_name", label: "Name" },
         { type: "int", path: "scenario.age", label: "Age", min: 0, max: 120 },
         { type: "textarea", path: "scenario.prompt", label: "Scenario",
-          help: "Who she is and what she knows walking in: family, work, personality, history, what she expects. Keep the result out of it: her voice reads this." },
-        { type: "textarea", path: "scenario.clinical_facts", label: "What the doctor has to tell her", optional: true,
-          help: "The result and plan. Only the scorer sees this (to recognise when the news is given); she never does." },
+          help: "Family, work, personality, history, what they expect to hear. Keep the result out of it: the patient's voice reads this." },
+        { type: "textarea", path: "scenario.clinical_facts", label: "What the doctor has to tell them", optional: true,
+          help: "The result and plan. Only the scorer sees this (to recognise when the news is given); the patient never does." },
       ],
     },
     {
@@ -68,76 +77,120 @@ const Characters = (() => {
       ],
     },
     {
-      title: "Starting point",
-      intro: "Where she is when the doctor walks in. Before the news her emotion stays near this; the emotional arc below takes over once she is told.",
+      title: "3D model",
+      intro: "The 3D patient in the Session view. Mood, gaze and lip sync come from the state engine and the voice; only the body is set here.",
+      fields: [
+        { type: "text", path: "avatar.url", label: "Model file (.glb)", optional: true, mono: true,
+          help: "Blank uses the default model. A TalkingHead-ready model with ARKit and Oculus viseme blendshapes and a Mixamo rig, under web/static/avatar/ or any URL." },
+        { type: "seg", path: "avatar.body", label: "Body", options: ["F", "M"],
+          help: "Which body the model has; it picks matching idle poses." },
+      ],
+    },
+    {
+      title: "Starting mood",
+      intro: "Where the patient is when the doctor walks in. Before the news their emotion stays near this; once told, the emotional arc takes over.",
       fields: [
         { type: "num", path: "initial_state.trust", label: "Trust", min: 0, max: 1, step: 0.01, hint: bandOf("trust_bands"),
           presets: [{ label: "Shut down", value: 0.10 }, { label: "Distrustful", value: 0.32 }, { label: "Guarded", value: 0.57 }, { label: "Trusting", value: 0.85 }] },
         { type: "num", path: "initial_state.saturation", label: "Saturation", min: 0, max: 1, step: 0.01, hint: bandOf("saturation_bands"),
-          help: "How much she has already taken in emotionally.",
+          help: "How much they have already taken in emotionally.",
           presets: [{ label: "Calm", value: 0.15 }, { label: "Strained", value: 0.45 }, { label: "Overwhelmed", value: 0.72 }, { label: "Breaking point", value: 0.93 }] },
-        { type: "seg", path: "initial_state.emotion.primary", label: "Primary emotion", options: ["NONE", ...EMOTIONS] },
-        { type: "seg", path: "initial_state.emotion.secondary", label: "Secondary emotion", options: ["NONE", ...EMOTIONS] },
-        { type: "num", path: "initial_state.emotion.blend_weight", label: "Blend", min: 0, max: 1, step: 0.05,
-          help: "How much the secondary emotion bleeds into the primary.",
-          presets: [{ label: "Subtle", value: 0.1 }, { label: "Balanced", value: 0.3 }, { label: "Strong", value: 0.5 }] },
+        { type: "seg", path: "initial_state.emotion.primary", label: "Main emotion", options: ["NONE", ...EMOTIONS] },
+        { type: "seg", path: "initial_state.emotion.secondary", label: "Undertone", options: ["NONE", ...EMOTIONS] },
         { type: "num", path: "initial_state.emotion.intensity", label: "Intensity", min: 0, max: 1, step: 0.05,
           presets: [{ label: "Mild", value: 0.4 }, { label: "Moderate", value: 0.65 }, { label: "Intense", value: 0.9 }] },
-        { type: "num", path: "initial_state.competence", label: "How she rates the doctor", min: 0, max: 1, step: 0.05, optional: true,
-          help: "Starting opinion of the doctor's competence. Clear answers raise it; jargon, empty reassurance and contempt lower it. Low competence feeds her anxiety." },
-        { type: "seg", path: "initial_state.defense.mode", label: "Starting defense", options: ["NONE", ...DEFENSES] },
-        { type: "seg", path: "initial_state.defense.masking", label: "Emotion the defense hides", options: ["NONE", ...EMOTIONS] },
       ],
     },
     {
-      title: "Defenses",
+      title: "Personality",
+      intro: "How guarded the patient is and how much they put up with.",
       fields: [
-        { type: "seg", path: "personality.preferred_defense_mode", label: "Preferred defense", options: DEFENSES,
-          help: "What she reaches for once trust falls below the threshold below." },
+        { type: "seg", path: "personality.preferred_defense_mode", label: "Defense", options: DEFENSES,
+          help: "What they reach for once trust falls below the threshold." },
         { type: "num", path: "personality.defense_trigger_trust", label: "Defense threshold", min: 0, max: 1, step: 0.01,
-          help: "Her defense switches on when trust drops below this. Higher means she guards herself sooner.",
+          help: "The defense switches on when trust drops below this. Higher means they guard themselves sooner.",
           presets: [{ label: "Rarely defensive", value: 0.20 }, { label: "Normal", value: 0.35 }, { label: "Quick to guard", value: 0.45 }] },
-      ],
-    },
-    {
-      title: "How she reacts",
-      intro: "Per behaviour Claude flags in the doctor's turn: change to trust and saturation at full strength (scaled by the flag's 0 to 1 intensity), and whether it counts as acknowledging her.",
-      fields: [
-        { type: "flag", name: "validating", label: "Validating her feelings", presets: RELIEF },
-        { type: "flag", name: "silence_tolerance", label: "Leaving space / silence", presets: SILENCE },
-        { type: "flag", name: "premature_reassurance", label: "Reassuring too early", presets: NEG },
-        { type: "flag", name: "jargon", label: "Medical jargon", presets: NEG },
-        { type: "flag", name: "logistics_first", label: "Logistics before feelings", presets: NEG },
-        { type: "flag", name: "interruption", label: "Talking over her", presets: NEG },
-        { type: "flag", name: "disrespect", label: "Disrespect or abuse", range: 1 },
-        { type: "num", path: "personality.acknowledgment_intensity_threshold", label: "Acknowledgment threshold", min: 0, max: 1, step: 0.05,
-          help: "An acknowledging flag only resets her patience when its intensity is at least this." },
-      ],
-    },
-    {
-      title: "When she feels ignored",
-      fields: [
         { type: "int", path: "personality.unacknowledged_threshold", label: "Patience (turns)", min: 1, max: 20,
-          help: "Turns in a row without acknowledgment before she escalates." },
+          help: "Turns in a row where the doctor does not acknowledge their feelings before they escalate." },
         { type: "pair", paths: ["personality.trust_penalty", "personality.saturation_penalty"], label: "Escalation",
           help: "Applied once when patience runs out, then the count restarts.", presets: ESCALATION },
       ],
     },
     {
-      title: "When she cuts the doctor off",
-      intro: "While the doctor is speaking she may interrupt with a short line. The chance is base probability times her intensity, checked only when every condition holds.",
+      title: "How the doctor's behaviour lands",
+      intro: "For each behaviour Claude flags in the doctor's turn: the change to trust and saturation at full strength (scaled by the flag's 0 to 1 intensity), and whether it counts as acknowledging the patient. The presets are a good start.",
       fields: [
-        { type: "multi", path: "interruption.trigger_emotions", label: "Only when her main emotion is", options: EMOTIONS },
-        { type: "num", path: "interruption.min_intensity", label: "Minimum intensity", min: 0, max: 1, step: 0.05 },
-        { type: "num", path: "interruption.min_seconds_before_interrupt", label: "Doctor has been talking for at least", min: 0, max: 30, step: 0.5, unit: "s" },
-        { type: "num", path: "interruption.cooldown_seconds", label: "Cooldown between interruptions", min: 0, max: 60, step: 1, unit: "s" },
-        { type: "num", path: "interruption.base_probability", label: "Base probability", min: 0, max: 1, step: 0.05 },
+        { type: "flag", name: "validating", label: "Validating their feelings", presets: RELIEF },
+        { type: "flag", name: "silence_tolerance", label: "Leaving space / silence", presets: SILENCE },
+        { type: "flag", name: "names_subtext", label: "Naming the worry underneath", presets: RELIEF },
+        { type: "flag", name: "removes_blame", label: "Saying it is not their fault", presets: RELIEF },
+        { type: "flag", name: "checks_understanding", label: "Checking what they understood", presets: RELIEF },
+        { type: "flag", name: "repairs", label: "Owning and fixing a misstep", presets: RELIEF },
+        { type: "flag", name: "premature_reassurance", label: "Reassuring too early", presets: NEG },
+        { type: "flag", name: "jargon", label: "Medical jargon", presets: NEG },
+        { type: "flag", name: "logistics_first", label: "Logistics before feelings", presets: NEG },
+        { type: "flag", name: "interruption", label: "Talking over them", presets: NEG },
+        { type: "flag", name: "blaming", label: "Implying they caused it", presets: NEG },
+        { type: "flag", name: "learner_defensive", label: "Doctor defends themselves", presets: NEG },
+        { type: "flag", name: "misreads_her", label: "Misreading their reaction", presets: NEG },
+        { type: "flag", name: "disrespect", label: "Disrespect or abuse", range: 1 },
       ],
+    },
+    {
+      title: "Audio tags",
+      intro: "Delivery tags the renderer may use for each emotion. v3 voices perform them; Flash strips them.",
+      fields: EMOTIONS.map((e) => ({ type: "tags", path: `audio_tags.${e}`, label: cap(e) })),
+    },
+
+    // ---- fine tuning: optional, defaults shown as placeholders -------------
+    { group: "Fine tuning", note: "Optional. Blank fields use the default shown in grey." },
+    {
+      title: "Starting mood details",
+      collapsed: true,
+      fields: [
+        { type: "num", path: "initial_state.emotion.blend_weight", label: "Undertone strength", min: 0, max: 1, step: 0.05,
+          help: "How much the undertone bleeds into the main emotion.",
+          presets: [{ label: "Subtle", value: 0.1 }, { label: "Balanced", value: 0.3 }, { label: "Strong", value: 0.5 }] },
+        { type: "num", path: "initial_state.competence", label: "How they rate the doctor", min: 0, max: 1, step: 0.05, optional: true,
+          help: "Starting opinion of the doctor's competence. Clear answers raise it; jargon, empty reassurance and contempt lower it. Low competence feeds their anxiety." },
+        { type: "seg", path: "initial_state.defense.mode", label: "Starting defense", options: ["NONE", ...DEFENSES] },
+        { type: "seg", path: "initial_state.defense.masking", label: "Emotion the defense hides", options: ["NONE", ...EMOTIONS] },
+        { type: "num", path: "personality.acknowledgment_intensity_threshold", label: "Acknowledgment threshold", min: 0, max: 1, step: 0.05,
+          help: "An acknowledging behaviour only resets their patience when its intensity is at least this." },
+      ],
+    },
+    {
+      title: "Unanswered questions",
+      collapsed: true,
+      intro: "When the doctor keeps talking past the patient's questions.",
+      fields: [
+        { type: "int", path: "arc.frustration_after", label: "Unanswered questions before frustration", min: 0, max: 10, optional: true,
+          help: "Questions in a row the doctor talks past. Past this, each further one costs trust and the patient turns passive-aggressive. 0 = off." },
+        { type: "num", path: "arc.frustration_trust", label: "...trust lost per further unanswered question", min: -0.5, max: 0, step: 0.01, optional: true },
+        { type: "num", path: "arc.frustration_saturation", label: "...saturation added per further unanswered question", min: 0, max: 0.5, step: 0.01, optional: true },
+      ],
+    },
+    {
+      title: "Blame and defensiveness",
+      collapsed: true,
+      intro: "Blame builds when the doctor implies the patient caused it and eases when they say it is not their fault. The defensive score is the blame level times the defensive weight.",
+      fields: [
+        { type: "num", path: "arc.blame_gain", label: "Blame added by a full-strength blaming turn", min: 0, max: 1, step: 0.05, optional: true },
+        { type: "num", path: "arc.blame_relief", label: "Blame removed by \"not your fault\"", min: 0, max: 1, step: 0.05, optional: true },
+        { type: "num", path: "arc.blame_decay", label: "Blame fades per turn by (fraction)", min: 0, max: 1, step: 0.05, optional: true },
+        { type: "num", path: "arc.weights.DEFENSIVE", label: "Weight: defensive", min: 0, max: 3, step: 0.1, optional: true },
+      ],
+    },
+    {
+      title: "Reactions by state",
+      collapsed: true,
+      intro: "The same words land differently depending on where the patient is. Each number multiplies that behaviour's trust and saturation change while they are in that emotion or defense (1 = no change).",
+      fields: [...EMOTIONS, ...DEFENSES].map((st) => ({ type: "reactions", state: st, label: cap(st).replace(/_/g, " ") })),
     },
     {
       title: "Emotional arc",
       collapsed: true,
-      intro: "How her emotions move once she is told. Each emotion's score comes from trust, saturation, how she rates the doctor and shock; the two strongest are her emotion and undertone. Blank uses the default shown.",
+      intro: "How the patient's emotions move once they are told. Each emotion's score comes from trust, saturation, how they rate the doctor and shock; the two strongest become the emotion and undertone.",
       fields: [
         { type: "num", path: "arc.disclosure.saturation", label: "Impact of the news on saturation", min: 0, max: 1, step: 0.05, optional: true },
         { type: "num", path: "arc.disclosure.trust", label: "Impact of the news on trust", min: -0.5, max: 0.5, step: 0.01, optional: true },
@@ -154,35 +207,53 @@ const Characters = (() => {
         { type: "num", path: "arc.weights.GRIEF", label: "Weight: grief", min: 0, max: 3, step: 0.1, optional: true },
         { type: "num", path: "arc.weights.FEAR", label: "Weight: fear / anxiety", min: 0, max: 3, step: 0.1, optional: true },
         { type: "num", path: "arc.weights.BARGAINING", label: "Weight: bargaining", min: 0, max: 3, step: 0.1, optional: true },
-        { type: "num", path: "arc.competence_deltas.answers_question", label: "Rates doctor: answering her question", min: -0.5, max: 0.5, step: 0.01, optional: true },
-        { type: "num", path: "arc.competence_deltas.validating", label: "Rates doctor: validating", min: -0.5, max: 0.5, step: 0.01, optional: true },
-        { type: "num", path: "arc.competence_deltas.jargon", label: "Rates doctor: jargon", min: -0.5, max: 0.5, step: 0.01, optional: true },
-        { type: "num", path: "arc.competence_deltas.premature_reassurance", label: "Rates doctor: empty reassurance", min: -0.5, max: 0.5, step: 0.01, optional: true },
-        { type: "num", path: "arc.competence_deltas.disrespect", label: "Rates doctor: disrespect", min: -0.5, max: 0.5, step: 0.01, optional: true },
-        { type: "num", path: "arc.walkout_trust", label: "She walks out when trust stays at or below", min: 0, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.walkout_trust", label: "Walks out when trust stays at or below", min: 0, max: 0.5, step: 0.01, optional: true },
         { type: "int", path: "arc.walkout_turns", label: "...for this many turns (0 = never)", min: 0, max: 10, optional: true },
       ],
     },
     {
-      title: "How she speaks",
+      title: "How they rate the doctor",
       collapsed: true,
-      intro: "Per emotion: an extra pause before she answers (scaled by intensity), voice speed (Flash/Turbo only; v3 ignores it), voice stability, and a description of her speech the renderer follows. Blank uses the default shown.",
+      intro: "Change to the patient's opinion of the doctor's competence per behaviour, at full strength.",
+      fields: [
+        { type: "num", path: "arc.competence_deltas.answers_question", label: "Answering their question", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.validating", label: "Validating", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.checks_understanding", label: "Checking understanding", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.repairs", label: "Repairing a misstep", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.jargon", label: "Jargon", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.premature_reassurance", label: "Empty reassurance", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.learner_defensive", label: "Defending themselves", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.blaming", label: "Blaming the patient", min: -0.5, max: 0.5, step: 0.01, optional: true },
+        { type: "num", path: "arc.competence_deltas.disrespect", label: "Disrespect", min: -0.5, max: 0.5, step: 0.01, optional: true },
+      ],
+    },
+    {
+      title: "How they speak",
+      collapsed: true,
+      intro: "Per emotion: an extra pause before answering (scaled by intensity), voice speed (Flash/Turbo only; v3 ignores it), voice stability, and a description of their speech the renderer follows.",
       fields: EMOTIONS.flatMap((e) => [
         { type: "num", path: `speech.${e}.reply_delay_s`, label: `${cap(e)}: pause before answering`, min: 0, max: 4, step: 0.1, unit: "s", optional: true },
         { type: "num", path: `speech.${e}.speed`, label: `${cap(e)}: speed`, min: 0.7, max: 1.2, step: 0.01, optional: true },
         { type: "num", path: `speech.${e}.stability`, label: `${cap(e)}: stability`, min: 0, max: 1, step: 0.05, optional: true },
-        { type: "textarea", path: `speech.${e}.style`, label: `${cap(e)}: how she speaks`, optional: true, rows: 2 },
+        { type: "textarea", path: `speech.${e}.style`, label: `${cap(e)}: how they speak`, optional: true, rows: 2 },
       ]),
     },
     {
-      title: "Audio tags",
-      intro: "Delivery tags the renderer may use for each emotion. v3 voices perform them; Flash strips them.",
-      fields: EMOTIONS.map((e) => ({ type: "tags", path: `audio_tags.${e}`, label: cap(e) })),
+      title: "When they cut the doctor off",
+      collapsed: true,
+      intro: "While the doctor is speaking the patient may interrupt with a short line. The chance is base probability times their intensity, checked only when every condition holds.",
+      fields: [
+        { type: "multi", path: "interruption.trigger_emotions", label: "Only when their main emotion is", options: EMOTIONS },
+        { type: "num", path: "interruption.min_intensity", label: "Minimum intensity", min: 0, max: 1, step: 0.05 },
+        { type: "num", path: "interruption.min_seconds_before_interrupt", label: "Doctor has been talking for at least", min: 0, max: 30, step: 0.5, unit: "s" },
+        { type: "num", path: "interruption.cooldown_seconds", label: "Cooldown between interruptions", min: 0, max: 60, step: 1, unit: "s" },
+        { type: "num", path: "interruption.base_probability", label: "Base probability", min: 0, max: 1, step: 0.05 },
+      ],
     },
     {
       title: "Trust and saturation bands",
       collapsed: true,
-      intro: "Named ranges and the description Claude reads for each. Ranges should cover 0 to 1 without gaps.",
+      intro: "Named ranges and the description Claude reads for each. Ranges should cover 0 to 1 without gaps. Untouched, the defaults are used.",
       fields: [
         { type: "bands", path: "severity_scale.trust_bands", label: "Trust" },
         { type: "bands", path: "severity_scale.saturation_bands", label: "Saturation" },
@@ -191,14 +262,14 @@ const Characters = (() => {
     {
       title: "Turn timing",
       collapsed: true,
-      intro: "How the doctor's speech is measured and when her reply is released. Blank uses the default.",
+      intro: "How the doctor's speech is measured and when the patient's reply is released.",
       fields: [
         { type: "num", path: "timing.pause_threshold_s", label: "Pause shown from", min: 0, max: 3, step: 0.1, unit: "s", optional: true, def: 0.7,
           help: "A gap between words at least this long is marked [pause Ns] for Claude." },
         { type: "num", path: "timing.slow_wpm", label: "Slow below", min: 40, max: 200, step: 5, unit: "wpm", optional: true, def: 100 },
         { type: "num", path: "timing.fast_wpm", label: "Fast above", min: 100, max: 300, step: 5, unit: "wpm", optional: true, def: 180 },
         { type: "int", path: "timing.min_words_for_rate", label: "Words needed for a rate", min: 1, max: 30, optional: true, def: 6 },
-        { type: "num", path: "timing.talk_over_min_bot_speaking_s", label: "Talk-over counts after she has spoken", min: 0, max: 5, step: 0.1, unit: "s", optional: true, def: 1.0 },
+        { type: "num", path: "timing.talk_over_min_bot_speaking_s", label: "Talk-over counts after the patient has spoken for", min: 0, max: 5, step: 0.1, unit: "s", optional: true, def: 1.0 },
         { type: "num", path: "timing.talk_over_flag", label: "Talk-over flag strength", min: 0, max: 1, step: 0.05, optional: true, def: 1.0 },
         { type: "num", path: "timing.commit_after_s", label: "Reply waits for quiet of", min: 0, max: 4, step: 0.1, unit: "s", optional: true, def: 1.0,
           help: "If the doctor speaks again before this, the turn reopens and merges." },
@@ -215,6 +286,11 @@ const Characters = (() => {
 
   const get = (o, p) => p.split(".").reduce((a, k) => (a == null ? undefined : a[k]), o);
   const defaultFor = (p) => get(DEFAULTS, p);
+  // A value as the session will see it: the file's, else the default.
+  const valueOf = (p) => get(draft, p) ?? defaultFor(p);
+  // Objects that are optional in a file but must be whole once written: the
+  // first edit inside one copies the default in, so nothing half-set is saved.
+  const WHOLE = [/^flag_deltas\.[a-z_]+/, /^severity_scale$/];
   function set(o, p, v) {
     const ks = p.split(".");
     let a = o;
@@ -232,6 +308,13 @@ const Characters = (() => {
     if (!draft) { ed.innerHTML = '<div class="section"><p class="empty">Loading…</p></div>'; return; }
     ed.innerHTML = "";
     SECTIONS.forEach((sec, i) => {
+      if (sec.group) {
+        const g = document.createElement("div");
+        g.className = "group";
+        g.innerHTML = `<h2>${esc(sec.group)}</h2>` + (sec.note ? `<p>${esc(sec.note)}</p>` : "");
+        ed.appendChild(g);
+        return;
+      }
       const box = document.createElement("details");
       box.className = "section";
       box.open = openState[i];
@@ -252,6 +335,10 @@ const Characters = (() => {
   }
 
   function update(path, value) {
+    for (const re of WHOLE) {
+      const m = path.match(re);
+      if (m && get(draft, m[0]) === undefined && defaultFor(m[0]) !== undefined) set(draft, m[0], structuredClone(defaultFor(m[0])));
+    }
     set(draft, path, value);
     changed();
   }
@@ -262,9 +349,13 @@ const Characters = (() => {
         return shell(f, (c) => {
           const i = document.createElement("input");
           i.type = "text"; i.value = get(draft, f.path) ?? "";
-          i.style.width = f.mono ? "26ch" : "100%";
+          i.style.width = f.mono ? (f.optional ? "40ch" : "26ch") : "100%";
           if (f.mono) i.style.fontFamily = "ui-monospace, monospace";
-          i.oninput = () => update(f.path, f.mono ? i.value.trim() : i.value);
+          if (f.optional && defaultFor(f.path) !== undefined) i.placeholder = String(defaultFor(f.path));
+          i.oninput = () => {
+            const v = f.mono ? i.value.trim() : i.value;
+            update(f.path, f.optional && !v ? undefined : v);
+          };
           c.appendChild(i);
         });
       case "textarea":
@@ -339,6 +430,8 @@ const Characters = (() => {
         return bandsField(f);
       case "voiceTest":
         return voiceTestField();
+      case "reactions":
+        return reactionsField(f);
     }
   }
 
@@ -414,7 +507,7 @@ const Characters = (() => {
 
   function deltaControl(label, path, range, onChange) {
     const lab = document.createElement("label");
-    const v = get(draft, path) ?? 0;
+    const v = valueOf(path) ?? 0;
     lab.innerHTML = `<span style="min-width:66px">${label}</span>`;
     const slider = Object.assign(document.createElement("input"), { type: "range", min: -range, max: range, step: 0.01, value: v });
     const box = Object.assign(document.createElement("input"), { type: "number", min: -range, max: range, step: 0.01, value: v });
@@ -443,7 +536,7 @@ const Characters = (() => {
     let presetsEl;
     const paint = () => {
       if (!presetsEl) return;
-      const t = get(draft, paths[0]), s = get(draft, paths[1]);
+      const t = valueOf(paths[0]), s = valueOf(paths[1]);
       [...presetsEl.children].forEach((b, i) => (b.className = presets[i].trust === t && presets[i].sat === s ? "on" : ""));
     };
     const tr = deltaControl("trust", paths[0], range, paint);
@@ -451,9 +544,9 @@ const Characters = (() => {
     pair.append(tr, sa);
     if (ackPath) {
       const ack = document.createElement("label");
-      const cb = Object.assign(document.createElement("input"), { type: "checkbox", checked: !!get(draft, ackPath) });
+      const cb = Object.assign(document.createElement("input"), { type: "checkbox", checked: !!valueOf(ackPath) });
       cb.onchange = () => update(ackPath, cb.checked);
-      ack.append(cb, document.createTextNode("acknowledges her"));
+      ack.append(cb, document.createTextNode("acknowledges them"));
       pair.appendChild(ack);
     } else pair.appendChild(document.createElement("span"));
     el.appendChild(pair);
@@ -477,9 +570,31 @@ const Characters = (() => {
     el.className = "flag";
     el.innerHTML = `<div class="label" style="display:flex;justify-content:space-between"><b>${esc(f.label)}</b><code style="color:var(--muted);font-size:11px">flag_deltas.${f.name}</code></div>`;
     const base = `flag_deltas.${f.name}`;
-    if (!get(draft, base)) set(draft, base, { trust: 0, saturation: 0, acknowledges: false });
     pairBody(el, [`${base}.trust`, `${base}.saturation`], f.presets, f.range || 0.5, `${base}.acknowledges`);
     return el;
+  }
+
+  function reactionsField(f) {
+    return shell(f, (c) => {
+      const grid = document.createElement("div");
+      grid.className = "react-grid";
+      for (const [flag, short] of Object.entries(FLAG_LABELS)) {
+        const path = `reactions.${f.state}.${flag}`;
+        const lab = document.createElement("label");
+        const box = Object.assign(document.createElement("input"), { type: "number", min: 0, max: 3, step: 0.1 });
+        const cur = get(draft, path);
+        if (cur !== undefined) box.value = cur;
+        box.placeholder = String(defaultFor(path) ?? 1);
+        box.oninput = () => {
+          const n = parseFloat(box.value);
+          update(path, box.value.trim() === "" || Number.isNaN(n) ? undefined : round(n));
+          if (get(draft, `reactions.${f.state}`) && !Object.keys(get(draft, `reactions.${f.state}`)).length) set(draft, `reactions.${f.state}`, undefined);
+        };
+        lab.append(document.createTextNode(short), box);
+        grid.appendChild(lab);
+      }
+      c.appendChild(grid);
+    });
   }
 
   function pairField(f) {
@@ -521,7 +636,7 @@ const Characters = (() => {
 
   function bandsField(f) {
     return shell(f, (c) => {
-      const bands = get(draft, f.path) || {};
+      const bands = valueOf(f.path) || {};
       const t = document.createElement("table");
       t.className = "bands";
       for (const [name, b] of Object.entries(bands).sort((x, y) => y[1].min - x[1].min)) {

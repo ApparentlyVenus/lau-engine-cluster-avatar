@@ -1,16 +1,8 @@
 import json
 
-from state_engine.turn_flags import TurnFlags
+from state_engine.turn_flags import BEHAVIOUR_FLAGS, TurnFlags
 
-FLAG_NAMES = [
-    "validating",
-    "silence_tolerance",
-    "premature_reassurance",
-    "jargon",
-    "logistics_first",
-    "interruption",
-    "disrespect",
-]
+FLAG_NAMES = list(BEHAVIOUR_FLAGS)
 
 ANSWER_KEY = "answers_question"
 DISCLOSURE_KEY = "discloses_news"

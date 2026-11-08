@@ -9,12 +9,14 @@ class EmotionMode(Enum):
     FEAR = 5        # fear / anxiety: worry about what comes next
     BARGAINING = 6
     CALM = 7        # baseline guarded optimism, or settled problem-solving later
+    DEFENSIVE = 8   # justifying her own choices when she feels blamed
 
 class DefenseMode(Enum):
     NONE = 1
     SARCASM = 2
     INTELLECTUALIZING = 3
     MINIMIZING = 4
+    PASSIVE_AGGRESSIVE = 5  # "No, it's fine, whatever you think is best."
 
 @dataclass
 class EmotionState:
@@ -49,6 +51,10 @@ class PatientState:
     # ended the consultation.
     low_trust_turns: int = 0
     ended: bool = False
+    # How blamed she feels (feeds the DEFENSIVE emotion); fades turn by turn.
+    blame: float = 0.0
+    # Her questions in a row that got no straight answer (feeds frustration).
+    unanswered: int = 0
 
     @property
     def satisfaction(self) -> float:

@@ -102,10 +102,10 @@ def test_renderer_message_news_style_and_ending(persona):
 
     state = build_initial_state(persona)
     before = build_renderer_message(persona, state, "Hello.")
-    assert "has not been told" in before and "How she speaks right now:" in before
+    assert "have not been told" in before and "How they speak right now:" in before
     told, _ = apply_turn(state, TurnFlags(discloses_news=1.0), persona)
     after = build_renderer_message(persona, told, "It is cancer.")
-    assert "has been told" in after and "Halting" in after  # shock's speech style
+    assert "have been told" in after and "Halting" in after  # shock's speech style
     assert "ending the consultation" in build_renderer_message(persona, replace(told, ended=True), "x")
 
 

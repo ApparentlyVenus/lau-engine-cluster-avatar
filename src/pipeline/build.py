@@ -122,8 +122,12 @@ def build_session(
         ("renderer", [renderer]),
     ]
     if opts.tts:
+        from pipeline.lipsync import LipSyncTap, watch_word_timestamps
         from pipeline.tts import build_tts
-        stages.append(("tts", build_tts(voice, opts.tts_model)))
+        tts_procs = build_tts(voice, opts.tts_model)
+        # Word timings for the 3D patient's lip sync (see pipeline/lipsync.py).
+        watch_word_timestamps(tts_procs[-1])
+        stages.append(("tts", tts_procs + [LipSyncTap()]))
     stages.append(("output", [output_proc] if output_proc else []))
 
     processors: list[FrameProcessor] = []

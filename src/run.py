@@ -111,7 +111,7 @@ def run_checks(persona_path: str):
     for title, script, extra in (
         ("Prompt caching (system prompts must be >= 4,096 tokens)", "prompt_tokens.py", [persona_path]),
         ("Speech-to-text (Riva)", "riva_check.py", []),
-        ("Her voice (ElevenLabs)", "tts_check.py", [persona_path]),
+        ("Patient voice (ElevenLabs)", "tts_check.py", [persona_path]),
     ):
         print(f"\n=== {title} ===")
         subprocess.run([sys.executable, str(tools / script), *extra], check=False)
@@ -131,7 +131,7 @@ def main(argv=None):
     parser.add_argument("--no-word-times", action="store_true")
     parser.add_argument("--host", default="0.0.0.0")
     parser.add_argument("--port", type=int, default=7860)
-    parser.add_argument("--out", default="out", help="wav mode: where her replies are saved")
+    parser.add_argument("--out", default="out", help="wav mode: where the patient replies are saved")
     parser.add_argument("--serial", action="store_true", help="text mode: no speculative renderer")
     args = parser.parse_args(argv)
 

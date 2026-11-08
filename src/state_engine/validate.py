@@ -1,18 +1,18 @@
 import json
+import os
 import sys
 
-REQUIRED_FLAGS = [
-    "validating",
-    "silence_tolerance",
-    "premature_reassurance",
-    "jargon",
-    "logistics_first",
-    "interruption",
-    "disrespect"
-]
+if __name__ == "__main__":  # run as a script: make `state_engine` importable
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-VALID_EMOTIONS = {"NONE", "SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING", "CALM"}
-VALID_DEFENSE_MODES = {"NONE", "SARCASM", "INTELLECTUALIZING", "MINIMIZING"}
+from state_engine.turn_flags import BEHAVIOUR_FLAGS, CORE_FLAGS
+
+# The seven original behaviours must be in every file; the brief's extra ones
+# are optional (defaults in turn_flags.DEFAULT_BRIEF_DELTAS).
+REQUIRED_FLAGS = list(CORE_FLAGS)
+
+VALID_EMOTIONS = {"NONE", "SHOCK", "ANGER", "GRIEF", "FEAR", "BARGAINING", "CALM", "DEFENSIVE"}
+VALID_DEFENSE_MODES = {"NONE", "SARCASM", "INTELLECTUALIZING", "MINIMIZING", "PASSIVE_AGGRESSIVE"}
 
 
 class TuningValidationError(Exception):
@@ -21,22 +21,22 @@ class TuningValidationError(Exception):
 
 TOP_LEVEL_KEYS = {
     "scenario", "severity_scale", "audio_tags", "personality", "interruption",
-    "initial_state", "flag_deltas", "timing", "voice", "arc", "speech",
+    "initial_state", "flag_deltas", "timing", "voice", "arc", "speech", "reactions", "avatar",
 }
 ARC_KEYS = {
     "disclosure", "shock_peak", "shock_decay", "shock_relief", "shock_prolong", "pre_news_anxiety",
     "weights", "competence_deltas", "walkout_trust", "walkout_turns",
+    "blame_gain", "blame_relief", "blame_decay",
+    "frustration_after", "frustration_trust", "frustration_saturation",
 }
-COMPETENCE_KEYS = {
-    "validating", "silence_tolerance", "premature_reassurance", "jargon", "logistics_first",
-    "interruption", "disrespect", "answers_question",
-}
+COMPETENCE_KEYS = set(BEHAVIOUR_FLAGS) | {"answers_question"}
 SPEECH_KEYS = {"reply_delay_s", "speed", "stability", "style"}
 TIMING_KEYS = {
     "pause_threshold_s", "slow_wpm", "fast_wpm", "min_words_for_rate",
     "talk_over_min_bot_speaking_s", "talk_over_flag", "commit_after_s", "commit_after_unfinished_s",
 }
 VOICE_KEYS = {"voice_id", "model", "stability"}
+AVATAR_KEYS = {"url", "body"}
 
 
 def validate_tuning_file(path: str) -> None:
@@ -58,7 +58,7 @@ def validate_tuning(tuning) -> list[str]:
     for check in (
         _validate_scenario, _validate_severity_scale, _validate_audio_tags, _validate_personality,
         _validate_interruption, _validate_initial_state, _validate_flag_deltas, _validate_timing, _validate_voice,
-        _validate_arc, _validate_speech,
+        _validate_arc, _validate_speech, _validate_reactions, _validate_avatar,
     ):
         try:
             errors += check(tuning)
@@ -93,7 +93,7 @@ def _validate_scenario(tuning: dict) -> list[str]:
 def _validate_severity_scale(tuning: dict) -> list[str]:
     errors = []
     if "severity_scale" not in tuning:
-        return ["Missing top-level key: severity_scale"]
+        return []  # optional; defaults in state_engine.config.DEFAULT_SEVERITY_SCALE
 
     scale = tuning["severity_scale"]
     for band_group in ("trust_bands", "saturation_bands"):
@@ -247,9 +247,10 @@ def _validate_flag_deltas(tuning: dict) -> list[str]:
         return ["Missing top-level key: flag_deltas"]
 
     deltas = tuning["flag_deltas"]
-    for flag_name in REQUIRED_FLAGS:
+    for flag_name in BEHAVIOUR_FLAGS:
         if flag_name not in deltas:
-            errors.append(f"Missing flag_deltas.{flag_name}")
+            if flag_name in REQUIRED_FLAGS:
+                errors.append(f"Missing flag_deltas.{flag_name}")
             continue
         rule = deltas[flag_name]
         for key in ("trust", "saturation", "acknowledges"):
@@ -261,7 +262,7 @@ def _validate_flag_deltas(tuning: dict) -> list[str]:
             if key in rule and (not _num(rule[key]) or not -1.0 <= rule[key] <= 1.0):
                 errors.append(f"flag_deltas.{flag_name}.{key} must be a number between -1 and 1")
 
-    unexpected = set(deltas.keys()) - set(REQUIRED_FLAGS)
+    unexpected = set(deltas.keys()) - set(BEHAVIOUR_FLAGS)
     if unexpected:
         errors.append(f"flag_deltas has unexpected keys: {sorted(unexpected)}")
 
@@ -314,6 +315,26 @@ def _validate_voice(tuning: dict) -> list[str]:
     return errors
 
 
+def _validate_avatar(tuning: dict) -> list[str]:
+    """Optional: the 3D model shown in the Session view. Without it the page
+    uses its default model (web/static/avatar/patient.glb)."""
+    avatar = tuning.get("avatar")
+    if avatar is None:
+        return []
+    if not isinstance(avatar, dict):
+        return ["avatar must be an object"]
+    errors = []
+    unknown = set(avatar) - AVATAR_KEYS
+    if unknown:
+        errors.append(f"avatar has unknown keys: {sorted(unknown)}")
+    url = avatar.get("url")
+    if url is not None and (not isinstance(url, str) or not url.strip().lower().split("?")[0].endswith(".glb")):
+        errors.append("avatar.url must be the address of a .glb file")
+    if "body" in avatar and avatar["body"] not in ("F", "M"):
+        errors.append('avatar.body must be "F" or "M"')
+    return errors
+
+
 def _unit(errors: list, path: str, value, lo: float = 0.0, hi: float = 1.0):
     if not _num(value) or not lo <= value <= hi:
         errors.append(f"{path} must be a number between {lo:g} and {hi:g}")
@@ -336,11 +357,16 @@ def _validate_arc(tuning: dict) -> list[str]:
     else:
         for k, v in disclosure.items():
             _unit(errors, f"arc.disclosure.{k}", v, -1, 1)
-    for key in ("shock_peak", "shock_decay", "pre_news_anxiety", "walkout_trust"):
+    for key in ("shock_peak", "shock_decay", "pre_news_anxiety", "walkout_trust",
+                "blame_gain", "blame_relief", "blame_decay"):
         if key in arc:
             _unit(errors, f"arc.{key}", arc[key])
-    if "walkout_turns" in arc and (not isinstance(arc["walkout_turns"], int) or arc["walkout_turns"] < 0):
-        errors.append("arc.walkout_turns must be a whole number, 0 to disable")
+    for key in ("frustration_trust", "frustration_saturation"):
+        if key in arc:
+            _unit(errors, f"arc.{key}", arc[key], -1, 1)
+    for key in ("walkout_turns", "frustration_after"):
+        if key in arc and (not isinstance(arc[key], int) or isinstance(arc[key], bool) or arc[key] < 0):
+            errors.append(f"arc.{key} must be a whole number, 0 to disable")
     if "weights" in arc:
         w = arc["weights"]
         if not isinstance(w, dict):
@@ -389,6 +415,29 @@ def _validate_speech(tuning: dict) -> list[str]:
             _unit(errors, f"speech.{emotion}.stability", prof["stability"])
         if "style" in prof and not isinstance(prof["style"], str):
             errors.append(f"speech.{emotion}.style must be text")
+    return errors
+
+
+def _validate_reactions(tuning: dict) -> list[str]:
+    """Optional section; defaults live in state_engine.config.DEFAULT_REACTIONS."""
+    reactions = tuning.get("reactions")
+    if reactions is None:
+        return []
+    if not isinstance(reactions, dict):
+        return ["reactions must be an object"]
+    errors = []
+    states = (VALID_EMOTIONS | VALID_DEFENSE_MODES) - {"NONE"}
+    for state, mults in reactions.items():
+        if state not in states:
+            errors.append(f"reactions has invalid state: {state} (use an emotion or a defense mode)")
+            continue
+        if not isinstance(mults, dict):
+            errors.append(f"reactions.{state} must be an object")
+            continue
+        for flag, value in mults.items():
+            if flag not in BEHAVIOUR_FLAGS:
+                errors.append(f"reactions.{state} has unknown flag: {flag}")
+            _unit(errors, f"reactions.{state}.{flag}", value, 0, 3)
     return errors
 
 

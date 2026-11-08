@@ -95,14 +95,14 @@ def test_fillers_counted():
 def test_block_reports_gap_pause_and_rate():
     t = TurnTiming(words=SORRY, live=LiveTiming(gap_after_her_line_s=2.4))
     block = timing_block(t, CFG)
-    assert "Started speaking 2.4s after she finished." in block
+    assert "Started speaking 2.4s after the patient finished." in block
     assert 'Longest pause: 1.8s, after "sorry".' in block
     assert "(fast)" in block
 
 
 def test_block_reports_talk_over_instead_of_gap():
     t = TurnTiming(live=LiveTiming(gap_after_her_line_s=1.0, talked_over_her=True))
-    assert timing_block(t, CFG) == "- Started speaking while she was still talking."
+    assert timing_block(t, CFG) == "- Started speaking while the patient was still talking."
 
 
 def test_block_is_none_when_nothing_measured():

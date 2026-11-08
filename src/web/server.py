@@ -275,7 +275,7 @@ def serve(characters_dir: str, default_character: str, opts: SessionOptions, hos
     import uvicorn
 
     print(f"\n  Open http://localhost:{port} in your browser (VSCode forwards the port).")
-    print("  Use headphones: without them her voice can leak into the mic and trigger barge-in.\n")
+    print("  Use headphones: without them the patient's voice can leak into the mic and trigger barge-in.\n")
     try:
         uvicorn.run(
             create_app(characters_dir, default_character, opts),

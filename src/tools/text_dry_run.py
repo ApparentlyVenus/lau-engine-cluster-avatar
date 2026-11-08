@@ -21,7 +21,7 @@ from renderer.claude import stream_renderer
 from renderer.prompt import build_renderer_message
 from renderer.speculation import speculative_render
 from state_engine.config import PersonaConfig
-from state_engine.engine import apply_turn, build_initial_state
+from state_engine.engine import apply_turn, build_initial_state, she_asked
 from state_engine.turn_flags import TurnFlags
 
 
@@ -29,6 +29,7 @@ def print_state(state):
     print(f"trust={state.trust:.2f}  saturation={state.saturation:.2f}  unacknowledged={state.unacknowledged_turns}")
     print(f"emotion: {state.emotion.primary.name} / {state.emotion.secondary.name} (blend={state.emotion.blend_weight:.2f}, intensity={state.emotion.intensity:.2f})")
     print(f"defense: {state.defense.mode.name} masking {state.defense.masking.name}")
+    print(f"blame={state.blame:.2f}  unanswered questions={state.unanswered}")
 
 
 async def main(persona_path: str, serial: bool):
@@ -53,6 +54,7 @@ async def main(persona_path: str, serial: bool):
 
         t0 = time.monotonic()
         interp_message = build_interpreter_message(persona, transcript, conversation)
+        asked = she_asked(conversation)
         conversation.append(f"Learner: {transcript}")
         snapshot = list(conversation)
         timings: dict[str, float] = {}
@@ -62,7 +64,7 @@ async def main(persona_path: str, serial: bool):
             raw = await call_interpreter(interp_message, persona)
             flags = parse_turn_flags(raw)
             timings["interp"] = time.monotonic() - t0
-            new_state, escalated = apply_turn(state, flags, persona)
+            new_state, escalated = apply_turn(state, flags, persona, she_asked=asked)
             result.update(flags=flags, state=new_state, escalated=escalated)
             return build_renderer_message(persona, new_state, transcript, history=snapshot)
 
@@ -78,7 +80,7 @@ async def main(persona_path: str, serial: bool):
                 await emit(chunk)
             hit = None
         else:
-            predicted, _ = apply_turn(state, TurnFlags(), persona)
+            predicted, _ = apply_turn(state, TurnFlags(), persona, she_asked=asked)
             spec_message = build_renderer_message(persona, predicted, transcript, history=snapshot)
             _, hit = await speculative_render(spec_message, interpret(), partial(stream_renderer, persona=persona), emit)
             hits += hit

@@ -69,7 +69,7 @@ const App = {
   },
 
   show(view) {
-    for (const v of ["session", "characters"]) {
+    for (const v of ["session", "characters", "turnlog"]) {
       $("view-" + v).hidden = v !== view;
       $("nav-" + v).className = v === view ? "on" : "";
     }
@@ -89,7 +89,8 @@ function remembered() {
 }
 
 function route() {
-  App.show(location.hash === "#characters" ? "characters" : "session");
+  const views = { "#characters": "characters", "#turnlog": "turnlog" };
+  App.show(views[location.hash] || "session");
 }
 
 window.addEventListener("hashchange", route);

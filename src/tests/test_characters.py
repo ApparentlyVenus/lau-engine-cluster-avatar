@@ -36,9 +36,9 @@ def test_shipped_file_is_valid():
 
 @pytest.mark.parametrize("mutate,expect", [
     (lambda d: d.update(typo={}), "Unknown top-level keys"),
-    (lambda d: d["timing"].update(fast_wpm=50), "slow_wpm must be below"),
-    (lambda d: d["timing"].update(commit_after_unfinished_s=0.5), "commit_after_unfinished_s"),
-    (lambda d: d["timing"].update(bogus=1), "timing has unknown keys"),
+    (lambda d: d.setdefault("timing", {}).update(slow_wpm=100, fast_wpm=50), "slow_wpm must be below"),
+    (lambda d: d.setdefault("timing", {}).update(commit_after_s=1.0, commit_after_unfinished_s=0.5), "commit_after_unfinished_s"),
+    (lambda d: d.setdefault("timing", {}).update(bogus=1), "timing has unknown keys"),
     (lambda d: d["voice"].update(stability=2), "voice.stability"),
     (lambda d: d["voice"].update(model="gpt"), "voice.model"),
     (lambda d: d["flag_deltas"]["jargon"].update(trust=5), "flag_deltas.jargon.trust"),
@@ -54,7 +54,7 @@ def test_validation_catches(mutate, expect):
 
 def test_timing_and_voice_are_optional():
     data = layla()
-    del data["timing"], data["voice"]
+    data.pop("timing", None), data.pop("voice")
     assert validate_tuning(data) == []
 
 
@@ -158,7 +158,7 @@ def test_editor_schema_covers_every_key():
             else:
                 yield p
 
-    covered_by_widget = ("severity_scale.", "flag_deltas.", "speech.")  # widgets that build these paths
+    covered_by_widget = ("severity_scale.", "flag_deltas.", "speech.", "reactions.")  # widgets that build these paths
     missing = [
         p for p in leaves(layla())
         if not p.startswith(covered_by_widget) and f'"{p}"' not in js and f"`{p}`" not in js

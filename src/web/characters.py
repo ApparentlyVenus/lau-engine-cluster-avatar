@@ -31,15 +31,34 @@ def slugify(name: str) -> str:
     return slug or "patient"
 
 
+def to_json(data, indent: int = 0, width: int = 110) -> str:
+    """Pretty JSON that keeps small objects and lists of plain values on one
+    line, so a character file stays short enough to read at a glance."""
+    one_line = json.dumps(data, ensure_ascii=False, separators=(", ", ": "))
+    flat = not isinstance(data, (dict, list)) or not any(isinstance(v, (dict, list)) for v in (data.values() if isinstance(data, dict) else data))
+    if not isinstance(data, (dict, list)) or (flat and indent * 2 + len(one_line) <= width) or not data:
+        if isinstance(data, dict) and data:
+            return "{ " + one_line[1:-1] + " }"
+        if isinstance(data, list) and data:
+            return "[ " + one_line[1:-1] + " ]"
+        return one_line
+    pad, inner = "  " * indent, "  " * (indent + 1)
+    if isinstance(data, dict):
+        rows = [f"{inner}{json.dumps(k, ensure_ascii=False)}: {to_json(v, indent + 1, width)}" for k, v in data.items()]
+        return "{\n" + ",\n".join(rows) + f"\n{pad}}}"
+    rows = [f"{inner}{to_json(v, indent + 1, width)}" for v in data]
+    return "[\n" + ",\n".join(rows) + f"\n{pad}]"
+
+
 def warnings_for(data: dict) -> list[str]:
     """Problems that do not stop the file from loading but matter in a session."""
     out = []
     scenario = data.get("scenario") if isinstance(data.get("scenario"), dict) else {}
     if not str(scenario.get("prompt", "")).strip():
-        out.append("Scenario is empty: she will not know why she is here.")
+        out.append("Scenario is empty: the patient will not know why they are here.")
     voice = data.get("voice") if isinstance(data.get("voice"), dict) else {}
     if not str(voice.get("voice_id", "")).strip():
-        out.append("No voice_id: she cannot speak until one is set (sessions need --no-tts).")
+        out.append("No voice_id: the patient cannot speak until one is set (sessions need --no-tts).")
     return out
 
 
@@ -91,6 +110,7 @@ class CharacterStore:
             "id": char_id,
             "name": scenario.get("patient_name") or char_id,
             "age": scenario.get("age"),
+            "avatar": data.get("avatar") if isinstance(data.get("avatar"), dict) else None,
             "errors": validate_tuning(data),
             "warnings": warnings_for(data),
         }
@@ -109,8 +129,7 @@ class CharacterStore:
         # Write to a temp file and rename, so a crash never leaves half a file.
         fd, tmp = tempfile.mkstemp(dir=self.folder, prefix=".tmp-", suffix=".json")
         with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
+            f.write(to_json(data) + "\n")
         os.replace(tmp, p)
         return self.summary(char_id)
 

@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Patient Simulator</title>
 <link rel="stylesheet" href="/static/app.css">
+<script type="importmap">
+{ "imports": {
+    "three": "/static/vendor/three/build/three.module.js",
+    "three/addons/": "/static/vendor/three/examples/jsm/",
+    "talkinghead": "/static/vendor/talkinghead/talkinghead.mjs"
+} }
+</script>
 </head>
 <body>
 <header>
@@ -13,6 +20,7 @@
   <nav>
     <a href="#session" id="nav-session">Session</a>
     <a href="#characters" id="nav-characters">Characters</a>
+    <a href="#turnlog" id="nav-turnlog">Turn log</a>
   </nav>
   <span class="spacer"></span>
   <label class="inline">Patient <select id="character"></select></label>
@@ -26,13 +34,17 @@
     <span class="spacer"></span>
     <label class="inline">mic <span class="meter"><i id="level"></i></span></label>
     <label class="inline"><input type="checkbox" id="barge"> barge-in</label>
+    <label class="inline"><input type="checkbox" id="avatar-on" checked> 3D patient</label>
     <button id="go">Start</button>
   </div>
   <main class="session">
+    <div class="convo">
+    <div class="stage" id="stage"><div id="avatar"></div><div class="avatar-status" id="avatar-status" hidden></div></div>
     <section id="log"><p class="empty">Pick a patient, press Start, allow the microphone, and speak as the doctor. Headphones recommended.</p></section>
+    </div>
     <aside class="side">
       <div class="card">
-        <h2>Her state</h2>
+        <h2>Patient state</h2>
         <div class="emotion" id="emotion">–</div>
         <div class="note" id="undertone"></div>
         <div class="row"><span>Trust</span><b id="trust">–</b></div>
@@ -45,6 +57,8 @@
         <div class="row"><span>News</span><b id="news">–</b></div>
         <div class="row"><span>Satisfaction</span><b id="satis">–</b></div>
         <div class="row"><span>Unacknowledged turns</span><b id="unack">–</b></div>
+        <div class="row"><span>Unanswered questions</span><b id="unans">–</b></div>
+        <div class="row"><span>Blame</span><b id="blame">–</b></div>
       </div>
       <div class="card">
         <h2>Last turn scored</h2>
@@ -86,7 +100,7 @@
           <button class="ghost" id="export">Export JSON</button>
           <button class="danger" id="delete">Delete</button>
         </div>
-        <button class="ghost" id="talk">Talk to her</button>
+        <button class="ghost" id="talk">Talk to them</button>
       </div>
       <div class="card">
         <h2>At a glance</h2>
@@ -96,8 +110,21 @@
   </div>
 </div>
 
+<!-- ===== Turn log ========================================================== -->
+<div id="view-turnlog" hidden>
+  <div class="toolbar">
+    <span><span class="who">Turn log</span><span class="sub" id="tl-count"></span></span>
+    <span class="spacer"></span>
+    <button class="ghost small" id="tl-download">Download JSON</button>
+    <button class="ghost small" id="tl-clear">Clear</button>
+  </div>
+  <main class="turnlog" id="turnlog"></main>
+</div>
+
 <script src="/static/app.js"></script>
+<script src="/static/turnlog.js"></script>
 <script src="/static/session.js"></script>
+<script type="module" src="/static/avatar/avatar.js"></script>
 <script src="/static/characters.js"></script>
 </body>
 </html>

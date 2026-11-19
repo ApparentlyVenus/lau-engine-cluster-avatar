@@ -1,7 +1,6 @@
 import asyncio
 from functools import partial
 import os
-import re
 import time
 
 from pipecat.frames.frames import (
@@ -48,19 +47,11 @@ from tracing import mark
 SPECULATIVE_RENDER = os.environ.get("SPECULATIVE_RENDER", "1") != "0"
 RESUME_WITHIN_S = 0.5
 
-# The renderer occasionally answers as the model instead of as her (usually
-# after abusive input). That must never reach the learner's ears.
-OUT_OF_CHARACTER_FALLBACK = "I'm not doing this. I want to speak to someone else, please."
-_OUT_OF_CHARACTER = re.compile(
-    r"\b(role-?play|simulation|the learner|as an ai|language model|i'?m an ai|"
-    r"i can'?t (engage|continue|help with)|i'?m not able to continue|i won'?t continue|"
-    r"training exercise|in character|out of character)\b",
-    re.IGNORECASE,
-)
-
-
-def is_out_of_character(text: str) -> bool:
-    return bool(_OUT_OF_CHARACTER.search(text))
+# The renderer occasionally answers as the model instead of as the patient
+# (usually after abusive input). That must never reach the learner's ears: the
+# reply is replaced by an in-character line that fits the moment (see
+# pipeline/fallback.py). Re-exported here for older imports and tests.
+from pipeline.fallback import OUT_OF_CHARACTER_FALLBACK, FallbackLines, is_out_of_character  # noqa: E402,F401
 
 
 async def send_ui(processor: FrameProcessor, message: dict):
@@ -380,6 +371,9 @@ class RendererProcessor(FrameProcessor):
         self.active_turn: int | None = None
         self.released = True
         self.out_of_character = False
+        # Varied in-character lines for when the model breaks character.
+        self.fallback = FallbackLines()
+        self.fallback_line: str | None = None
         # TTS services only flush to ElevenLabs on LLMFullResponseEndFrame, so
         # every reply is framed Start -> text -> End. Without the End the text
         # sits in ElevenLabs' buffer and no audio comes back.
@@ -495,9 +489,11 @@ class RendererProcessor(FrameProcessor):
             return  # rest of an out-of-character reply: never spoken
         if is_out_of_character(chunk):
             self.out_of_character = True
-            mark("renderer", "OUT OF CHARACTER", f"model broke character, replaced: {chunk!r}")
-            await send_ui(self, {"type": "out_of_character", "text": chunk})
-            chunk = OUT_OF_CHARACTER_FALLBACK
+            self.fallback_line = self.fallback.pick(self.turn_state)
+            mark("renderer", "OUT OF CHARACTER",
+                 f"#{self.fallback.count} this session, replaced: {chunk!r} -> {self.fallback_line!r}")
+            await send_ui(self, {"type": "out_of_character", "text": chunk, "count": self.fallback.count})
+            chunk = self.fallback_line
         if self.active is not None:
             self.active[1].append(chunk)
         mark("renderer", "chunk -> TTS", repr(chunk), key="first_chunk")
@@ -537,6 +533,7 @@ class RendererProcessor(FrameProcessor):
         self.active_turn = turn_id
         self.released = self.gate is None
         self.out_of_character = False
+        self.fallback_line = None
 
     def cancel_turn(self, gate_turn):
         """Gate callback: the learner kept talking before she spoke."""
@@ -554,7 +551,7 @@ class RendererProcessor(FrameProcessor):
 
     async def _finish(self, history: list, line: str, extra: str = ""):
         if self.out_of_character:
-            line = OUT_OF_CHARACTER_FALLBACK
+            line = self.fallback_line or OUT_OF_CHARACTER_FALLBACK
         await self._close_response()
         self.active = None
         mark("renderer", "stream done", extra, key="render_done")

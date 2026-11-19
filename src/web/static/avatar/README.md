@@ -7,11 +7,20 @@ in `../vendor/three`). No build step: `index.html` maps the imports.
 
 ## How it is driven
 
-- **Emotion:** every `state` event from the state engine sets the face. The
-  emotion picks a base expression, the undertone is blended in, intensity
-  scales it, and the active defense adds a mask on top (`FACES` and `MASKS` in
-  `avatar.js`). Gaze also follows the emotion (low eye contact in shock and
-  grief).
+- **Emotion:** every `state` event sets the face. The emotion picks a base
+  expression, the undertone is blended in, intensity scales it, and the active
+  defense adds a mask on top (`FACES` and `MASKS` in `avatar.js`). Each
+  emotion also sets posture (head down in grief), gaze (low eye contact in
+  shock and grief) and how much the head moves (almost frozen in shock). When
+  an emotion or defense first appears, a short reaction plays (for example a
+  rolled eye for sarcasm); if she is talking at that moment, it waits until
+  she stops so it does not fight the lip sync.
+- **Idle motion:** kept small on purpose. TalkingHead's stock moods switch
+  poses, sweep the head and twitch the mouth and brows at random; here only
+  breathing, blinking, eye movement and a small head drift remain, and there
+  are no hand gestures while talking. Measured in a headless browser over
+  20 s at rest: head movement down from about 7 to 9 degrees (standard
+  deviation of yaw) to about 1, random face twitching down about 6 times.
 - **Lip sync:** the server sends each word's position in the audio
   (`pipeline/lipsync.py`). The page plays the voice as before; a silent copy of
   the audio goes to TalkingHead as the clock, and each word is handed over once

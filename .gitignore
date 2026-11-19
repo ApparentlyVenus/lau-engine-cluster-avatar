@@ -218,3 +218,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 .vscode/
+# vendored three.js for the 3D patient (the build/ rule would drop it)
+!src/web/static/vendor/three/build/

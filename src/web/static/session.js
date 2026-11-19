@@ -208,14 +208,20 @@ const Session = (() => {
     sttEmpty = 0;
     resetPanels();
     playCtx = new AudioContext({ sampleRate: OUT_RATE });
-    micStream = await navigator.mediaDevices.getUserMedia({
-      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
-    });
+    try {
+      micStream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 },
+      });
+    } catch (e) {
+      // No microphone (or not allowed): the doctor can still type.
+      if (!confirm(`No microphone (${e.message}). Continue with the keyboard only?`)) throw e;
+      micStream = null;
+    }
     // Let the browser resample the mic to 16 kHz: its resampler filters
     // properly, while the worklet's fallback (averaging every ~3 samples)
     // lets aliasing through, which costs speech-to-text accuracy.
     let node;
-    for (const opts of [{ sampleRate: IN_RATE }, {}]) {
+    for (const opts of micStream ? [{ sampleRate: IN_RATE }, {}] : []) {
       try {
         micCtx = new AudioContext(opts);
         await micCtx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" })));
@@ -252,13 +258,31 @@ const Session = (() => {
       }
       stop();
     };
-    node.port.onmessage = (e) => {
+    if (node) node.port.onmessage = (e) => {
       if (e.data.level !== undefined) { $("level").style.width = Math.min(100, e.data.level * 250) + "%"; return; }
       if (ws && ws.readyState === 1) ws.send(e.data);
     };
     $("go").textContent = "End"; $("go").className = "stop";
     $("barge").disabled = $("character").disabled = true;
+    $("say-text").disabled = $("say-send").disabled = false;
+    $("say-text").placeholder = micStream ? "Or type what you say as the doctor, then Enter" : "Type what you say as the doctor, then Enter";
   }
+
+  // ---- typing instead of speaking ------------------------------------------------
+  // The typed line is scored and answered like speech, without timing
+  // measurements (no pauses or speaking rate to measure).
+  function say() {
+    const box = $("say-text");
+    const text = box.value.trim();
+    if (!text || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type: "say", text }));
+    box.value = "";
+    box.focus();
+  }
+  $("say-send").onclick = say;
+  $("say-text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); say(); }
+  });
 
   // One id per browser tab, so a new session replaces only this tab's old one.
   function clientId() {
@@ -279,6 +303,8 @@ const Session = (() => {
     micStream = micCtx = null;
     $("go").textContent = "Start"; $("go").className = "";
     $("barge").disabled = $("character").disabled = false;
+    $("say-text").disabled = $("say-send").disabled = true;
+    $("say-text").placeholder = "Start a session to type";
     $("dot").className = "dot"; $("level").style.width = "0";
   }
 

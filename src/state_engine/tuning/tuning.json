@@ -41,8 +41,9 @@
   "interruption": {
     "trigger_emotions": [ "ANGER", "FEAR" ],
     "min_intensity": 0.6,
-    "min_seconds_before_interrupt": 3.0,
-    "cooldown_seconds": 8.0,
+    "min_seconds_before_interrupt": 3,
+    "cooldown_seconds": 8,
     "base_probability": 0.4
-  }
+  },
+  "arc": { "frustration_after": 0 }
 }

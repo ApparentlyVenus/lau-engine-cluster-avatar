@@ -41,6 +41,10 @@
     <div class="convo">
     <div class="stage" id="stage"><div id="avatar"></div><div class="avatar-status" id="avatar-status" hidden></div></div>
     <section id="log"><p class="empty">Pick a patient, press Start, allow the microphone, and speak as the doctor. Headphones recommended.</p></section>
+    <form class="say" id="say" onsubmit="return false">
+      <textarea id="say-text" rows="1" placeholder="Start a session to type" disabled></textarea>
+      <button type="button" id="say-send" disabled>Send</button>
+    </form>
     </div>
     <aside class="side">
       <div class="card">

@@ -18,22 +18,29 @@ import asyncio
 import os
 import time
 from pathlib import Path
-
-import httpx
 from urllib.parse import parse_qs
 
+import httpx
 from fastapi import Body, FastAPI, Request, WebSocket
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 from pipecat.frames.frames import OutputTransportMessageUrgentFrame
-from pipecat.transports.websocket.fastapi import FastAPIWebsocketParams, FastAPIWebsocketTransport
+from pipecat.transports.websocket.fastapi import (
+    FastAPIWebsocketParams,
+    FastAPIWebsocketTransport,
+)
 from pipecat.workers.runner import WorkerRunner
 
 import tracing
 from pipeline.build import SessionOptions, build_session
 from pipeline.processors import state_summary
-from state_engine.config import PersonaConfig
-from state_engine.config import tuning_defaults
+from state_engine.config import PersonaConfig, tuning_defaults
 from state_engine.validate import validate_tuning
 from tracing import mark
 from web import auth

@@ -24,6 +24,7 @@ from pipeline.processors import (
 from pipeline.timing import TimingConfig
 from pipeline.turn_gate import TurnGate
 from pipeline.turn_merger import TurnMerger
+from pipeline.typed_input import TypedTurnInput
 from pipeline.turns import DEFAULT_HOLD_S, build_turn_processor
 from state_engine.config import PersonaConfig
 from tracing import mark
@@ -95,6 +96,8 @@ def build_session(
 
     gate = TurnGate(timing_cfg.commit_after_s, timing_cfg.commit_after_unfinished_s)
     tracker = TimingTracker(timing_cfg, gate=gate)
+    # Typed turns join right after the tracker (see pipeline/typed_input.py).
+    typed = TypedTurnInput(gate=gate, timing_tracker=tracker, barge_in=opts.barge_in)
     merger = TurnMerger(on_event=lambda event, detail="": mark("merger", event, detail), gate=gate)
     interrupt_watcher = InterruptWatcherProcessor(persona, state_getter=lambda: interpreter.state)
     interpreter = InterpreterProcessor(
@@ -118,7 +121,7 @@ def build_session(
         ("vad", [VADProcessor(vad_analyzer=SileroVADAnalyzer())]),
         ("stt", [build_stt(opts.word_times, persona)]),
         ("turns", [build_turn_processor(hold_s=opts.hold_s, smart=opts.smart_turn, barge_in=opts.barge_in)]),
-        ("brain", [tracker, merger, interrupt_watcher, interpreter]),
+        ("brain", [tracker, typed, merger, interrupt_watcher, interpreter]),
         ("renderer", [renderer]),
     ]
     if opts.tts:

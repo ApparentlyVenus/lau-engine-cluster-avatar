@@ -2,6 +2,7 @@
 
 Browser -> server
     binary: raw PCM16 mono at 16 kHz (the learner's mic)
+    text:   {"type": "say", "text": "..."}, a turn the doctor typed
 Server -> browser
     binary: raw PCM16 mono at 24 kHz (her voice)
     text:   JSON events, {"type": ...}: transcript, her line, state, latency,
@@ -13,6 +14,7 @@ import json
 from pipecat.frames.frames import (
     Frame,
     InputAudioRawFrame,
+    InputTransportMessageFrame,
     InterruptionFrame,
     OutputAudioRawFrame,
     OutputTransportMessageFrame,
@@ -41,4 +43,10 @@ class PcmJsonSerializer(FrameSerializer):
             if not data:
                 return None
             return InputAudioRawFrame(audio=bytes(data), sample_rate=IN_SAMPLE_RATE, num_channels=1)
-        return None  # the page sends no control messages yet
+        try:
+            message = json.loads(data)
+        except (TypeError, ValueError):
+            return None
+        if isinstance(message, dict) and message.get("type") == "say" and isinstance(message.get("text"), str):
+            return InputTransportMessageFrame(message={"type": "say", "text": message["text"]})
+        return None

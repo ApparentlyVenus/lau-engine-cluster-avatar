@@ -19,6 +19,15 @@ from pathlib import Path
 SRC = Path(__file__).resolve().parent
 sys.path.insert(0, str(SRC))
 
+# Pipecat splits the patient's reply into sentences for the voice with NLTK,
+# which needs its "punkt_tab" tables. Hosts like Vercel have none and NLTK
+# cannot download them there, so the voice died after the first sentence.
+# The English tables ship in src/nltk_data; this must be set before anything
+# imports NLTK (Pipecat does, through pipeline.build below).
+os.environ["NLTK_DATA"] = os.pathsep.join(
+    p for p in (str(SRC / "nltk_data"), os.environ.get("NLTK_DATA", "")) if p
+)
+
 try:  # .env is for local runs; hosted deployments set real environment variables
     from dotenv import load_dotenv
 
@@ -28,13 +37,13 @@ except ImportError:
 
 # Pipecat logs every frame at DEBUG by default, which buries the pipeline's own
 # [run ...] lines in the host's logs. Keep warnings and errors only.
-from loguru import logger
+from loguru import logger  # noqa: E402
 
 logger.remove()
 logger.add(sys.stderr, level=os.environ.get("LOG_LEVEL", "WARNING"))
 
-from pipeline.build import SessionOptions
-from web.server import create_app
+from pipeline.build import SessionOptions  # noqa: E402
+from web.server import create_app  # noqa: E402
 
 opts = SessionOptions()
 opts.tts = os.environ.get("NO_TTS", "") not in ("1", "true")
